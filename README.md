@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # ASTRA
 
 **Personal AI Operating System**
@@ -130,6 +131,9 @@ Use [docs/architecture/decisions/template.md](docs/architecture/decisions/templa
 ## License
 
 [MIT](LICENSE)
+=======
+# Project_Astra
+>>>>>>> 2d7ed071b16dc748c6afeb210490acdc913d6514
 =======
 # Project_Astra
 >>>>>>> 2d7ed071b16dc748c6afeb210490acdc913d6514
