@@ -1,0 +1,17 @@
+.particles-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none; /* Let clicks pass through to the orb */
+  z-index: var(--z-base);
+  opacity: 1;
+  transition: opacity var(--transition-slow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particles-canvas {
+    opacity: 0.2; /* Show fewer/fainter particles for reduced motion */
+  }
+}

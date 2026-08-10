@@ -1,0 +1,78 @@
+# ========================
+# Environment & Secrets
+# ========================
+.env
+.env.local
+.env.*.local
+
+# ========================
+# Node.js / Frontend
+# ========================
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.vite/
+
+# ========================
+# Python / Backend
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+*.whl
+venv/
+.venv/
+env/
+.python-version
+*.pyo
+*.pyd
+
+# ========================
+# IDE & Editors
+# ========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================
+# Testing
+# ========================
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+
+# ========================
+# Docker
+# ========================
+docker-data/
+
+# ========================
+# Data (runtime generated)
+# ========================
+data/documents/
+data/uploads/
+data/cache/
+data/local/
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+
+# ========================
+# OS Files
+# ========================
+.DS_Store
+ehthumbs.db

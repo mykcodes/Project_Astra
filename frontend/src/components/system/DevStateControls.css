@@ -1,0 +1,54 @@
+.dev-state-controls {
+  position: absolute;
+  bottom: var(--space-4);
+  left: var(--space-4);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  z-index: var(--z-sticky);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  width: 280px;
+  box-shadow: var(--shadow-md);
+}
+
+.dev-state-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.dev-state-current {
+  color: var(--color-accent-light);
+}
+
+.dev-state-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dev-state-buttons button {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.dev-state-buttons button:not(:disabled):hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.dev-state-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

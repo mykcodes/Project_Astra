@@ -1,0 +1,77 @@
+.initialization-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Control Orb visibility and animation during boot */
+.initialization-wrapper.boot-hidden .orb {
+  opacity: 0;
+  transform: scale(0.5);
+}
+.initialization-wrapper.boot-hidden .orb-atmospheric-glow,
+.initialization-wrapper.boot-hidden .orb-energy-ring,
+.initialization-wrapper.boot-hidden .orb-core {
+  opacity: 0;
+}
+.initialization-wrapper.boot-hidden .orb-state-label {
+  opacity: 0;
+}
+
+/* Emerging: scale up, fade in */
+.initialization-wrapper.boot-emerging .orb {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 600ms ease, transform var(--transition-spring);
+}
+.initialization-wrapper.boot-emerging .orb-core {
+  opacity: 1;
+  transition: opacity 600ms ease;
+}
+.initialization-wrapper.boot-emerging .orb-atmospheric-glow,
+.initialization-wrapper.boot-emerging .orb-energy-ring {
+  opacity: 0;
+}
+.initialization-wrapper.boot-emerging .orb-state-label {
+  opacity: 0;
+}
+
+/* Glowing: glow appears */
+.initialization-wrapper.boot-glowing .orb {
+  opacity: 1;
+  transform: scale(1);
+}
+.initialization-wrapper.boot-glowing .orb-core {
+  opacity: 1;
+}
+.initialization-wrapper.boot-glowing .orb-atmospheric-glow,
+.initialization-wrapper.boot-glowing .orb-energy-ring {
+  opacity: 1; 
+  transition: opacity 800ms ease;
+}
+.initialization-wrapper.boot-glowing .orb-state-label {
+  opacity: 0;
+}
+
+/* Particles / Settled: everything normal, label fades in */
+.initialization-wrapper.boot-particles .orb-state-label,
+.initialization-wrapper.boot-settled .orb-state-label {
+  opacity: 1;
+  transition: opacity 600ms ease;
+}
+
+/* Control Particles visibility */
+.initialization-wrapper.boot-hidden .particles-canvas,
+.initialization-wrapper.boot-emerging .particles-canvas,
+.initialization-wrapper.boot-glowing .particles-canvas {
+  opacity: 0;
+}
+
+.initialization-wrapper.boot-particles .particles-canvas,
+.initialization-wrapper.boot-settled .particles-canvas {
+  opacity: 1;
+  transition: opacity 1000ms ease;
+}
