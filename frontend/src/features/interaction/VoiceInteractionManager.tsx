@@ -21,6 +21,10 @@ export function VoiceInteractionManager() {
       try {
         switch (orbState) {
           case OrbState.LISTENING:
+            // Stop any ongoing playback on barge-in
+            audioPlaybackService.stop();
+            document.documentElement.style.setProperty('--audio-level', '0');
+            console.log('VOICE_CAPTURE_STARTED');
             processingRef.current = true;
             await microphoneService.startRecording();
             processingRef.current = false;
@@ -28,37 +32,40 @@ export function VoiceInteractionManager() {
 
           case OrbState.TRANSCRIBING:
             processingRef.current = true;
+            console.log('VOICE_CAPTURE_ENDED');
             const audioBlob = await microphoneService.stopRecording();
             
-            // 1. Transcribe
+            console.log('TRANSCRIPTION_STARTED');
             const transcript = await voiceClient.transcribeAudio(audioBlob);
+            console.log('TRANSCRIPTION_COMPLETED');
+            
             if (!transcript) throw new Error("Empty transcript");
             
-            sendOrbEvent(OrbEvent.PROCESSING_START);
-            
-            // 2. We are now heading to THINKING, the logic continues there.
-            // But we can just continue the async chain here if we want, 
-            // OR let the THINKING state handler catch it. 
-            // Better to let state handler catch it.
+            // Guard: don't transition if user cancelled/interrupted during transcription
+            if (useSystemStore.getState().orbState === OrbState.TRANSCRIBING) {
+              window.__lastTranscript = transcript;
+              sendOrbEvent(OrbEvent.PROCESSING_START);
+            }
             processingRef.current = false;
-            
-            // Wait, we need to pass the transcript to THINKING.
-            // Using a simple module-level variable or ref for the prototype.
-            window.__lastTranscript = transcript;
             break;
 
           case OrbState.THINKING:
             processingRef.current = true;
             const textToSend = window.__lastTranscript || "Hello ASTRA";
             
-            // 2. Get AI Response
+            console.log('AI_REQUEST_STARTED');
             const aiResponse = await voiceClient.sendMessage(textToSend);
+            console.log('AI_RESPONSE_RECEIVED');
             
-            // 3. Synthesize Speech
+            console.log('TTS_STARTED');
             const ttsAudioBlob = await voiceClient.synthesizeSpeech(aiResponse);
-            window.__lastAudioBlob = ttsAudioBlob;
+            console.log('TTS_COMPLETED');
             
-            sendOrbEvent(OrbEvent.RESPONSE_READY);
+            // Guard: don't transition if user cancelled/interrupted during processing
+            if (useSystemStore.getState().orbState === OrbState.THINKING) {
+              window.__lastAudioBlob = ttsAudioBlob;
+              sendOrbEvent(OrbEvent.RESPONSE_READY);
+            }
             processingRef.current = false;
             break;
 
@@ -73,12 +80,13 @@ export function VoiceInteractionManager() {
             break;
             
           case OrbState.IDLE:
-            // Stop any ongoing playback if we transition back to IDLE unexpectedly (interruption)
+            console.log('VOICE_SESSION_COMPLETED');
             audioPlaybackService.stop();
             document.documentElement.style.setProperty('--audio-level', '0');
             break;
             
           case OrbState.ERROR:
+            console.log('VOICE_ERROR');
             // Cleanup
             microphoneService.stopRecording().catch(() => {});
             audioPlaybackService.stop();
@@ -86,7 +94,9 @@ export function VoiceInteractionManager() {
             
             // Auto-clear error after 3 seconds for prototype
             setTimeout(() => {
-              sendOrbEvent(OrbEvent.ERROR_CLEARED);
+              if (useSystemStore.getState().orbState === OrbState.ERROR) {
+                sendOrbEvent(OrbEvent.ERROR_CLEARED);
+              }
             }, 3000);
             break;
         }

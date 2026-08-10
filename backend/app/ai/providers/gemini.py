@@ -14,8 +14,12 @@ from app.ai.providers.types import (
     AIResponse,
     AIResponseChunk,
     ModelCapabilities,
+    TokenUsage,
 )
 from app.core.config import get_settings
+from app.core.logging.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class GeminiProvider(AIProvider):
@@ -38,19 +42,11 @@ class GeminiProvider(AIProvider):
             raise ValueError("Gemini API Key missing. Cannot generate.")
             
         messages = []
+        system_instruction = None
+
         for msg in request.messages:
             if msg.role == "system":
-                # For Gemini, system instructions are best handled via system_instruction config,
-                # but for simplicity in this proxy loop we can prepend as a user/model interaction
-                # or just use types.Content(role="user", ...)
-                messages.append(types.Content(
-                    role="user", 
-                    parts=[types.Part.from_text(text=msg.content)]
-                ))
-                messages.append(types.Content(
-                    role="model", 
-                    parts=[types.Part.from_text(text="I understand the system instructions.")]
-                ))
+                system_instruction = msg.content
             else:
                 role = "user" if msg.role == "user" else "model"
                 messages.append(types.Content(
@@ -58,20 +54,33 @@ class GeminiProvider(AIProvider):
                     parts=[types.Part.from_text(text=msg.content)]
                 ))
 
+        logger.info(f"AI_REQUEST_STARTED: model={request.model or self.default_model}")
+
         response = await self.client.aio.models.generate_content(
             model=request.model or self.default_model,
             contents=messages,
             config=types.GenerateContentConfig(
                 temperature=request.temperature or 0.7,
                 max_output_tokens=request.max_tokens,
+                system_instruction=system_instruction,
             )
         )
 
+        logger.info("AI_RESPONSE_RECEIVED")
+
+        usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+        if response.usage_metadata:
+            usage = TokenUsage(
+                prompt_tokens=response.usage_metadata.prompt_token_count or 0,
+                completion_tokens=response.usage_metadata.candidates_token_count or 0,
+                total_tokens=response.usage_metadata.total_token_count or 0,
+            )
+
         return AIResponse(
-            content=response.text,
-            role="assistant",
+            content=response.text or "",
+            model=request.model or self.default_model,
+            usage=usage,
             finish_reason="stop",
-            metadata={"model": request.model or self.default_model}
         )
 
     async def generate_stream(

@@ -23,7 +23,7 @@ class GeminiSTTProvider:
         else:
             self.client = genai.Client(api_key=settings.gemini_api_key)
         # 1.5 flash or 2.0 flash works great for quick transcription
-        self.model = "gemini-2.0-flash" 
+        self.model = "gemini-3.6-flash" 
 
     async def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         """
@@ -33,6 +33,7 @@ class GeminiSTTProvider:
             raise ValueError("Gemini API Key missing. Cannot transcribe.")
             
         try:
+            logger.info("TRANSCRIPTION_STARTED")
             logger.info(f"Transcribing {len(request.audio_data)} bytes of {request.format.value} audio.")
             
             # Map our internal format to MIME type
@@ -58,6 +59,7 @@ class GeminiSTTProvider:
             )
             
             transcript = response.text.strip()
+            logger.info("TRANSCRIPTION_COMPLETED")
             
             return TranscriptionResult(
                 text=transcript,

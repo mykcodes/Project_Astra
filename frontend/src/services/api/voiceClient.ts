@@ -4,7 +4,7 @@
  * Handles API calls to the backend voice and conversation services.
  */
 
-const API_BASE = 'http://localhost:8000/api'; // Using hardcoded localhost for Phase 2 prototype
+const API_BASE = '/api';
 
 export class VoiceClient {
   /**

@@ -23,6 +23,7 @@ class GTTSProvider:
         Synthesize text into speech using gTTS.
         """
         try:
+            logger.info("TTS_STARTED")
             logger.info(f"Synthesizing {len(request.text)} characters of text.")
             
             # gTTS is blocking, so run it in a thread pool
@@ -33,6 +34,8 @@ class GTTSProvider:
                 return fp.getvalue()
 
             audio_data = await asyncio.to_thread(_generate)
+            
+            logger.info("TTS_COMPLETED")
 
             return SynthesisResult(
                 audio_data=audio_data,

@@ -17,19 +17,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.logging.logger import get_logger
+from app.core.lifecycle.state import set_start_time
 from app.api.routes import api_router
 
 logger = get_logger(__name__)
-
-# Track application start time for uptime calculation
-_start_time: float = 0.0
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan — startup and shutdown hooks."""
-    global _start_time
-    _start_time = time.time()
+    set_start_time()
 
     settings = get_settings()
     logger.info(
@@ -75,13 +72,6 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api")
 
     return app
-
-
-def get_uptime() -> float:
-    """Get application uptime in seconds."""
-    if _start_time == 0.0:
-        return 0.0
-    return time.time() - _start_time
 
 
 # Application instance

@@ -71,17 +71,20 @@ const TRANSITIONS: readonly Transition[] = [
 
   // --- TRANSCRIBING ---
   { from: OrbState.TRANSCRIBING, event: OrbEvent.PROCESSING_START, to: OrbState.THINKING },
+  { from: OrbState.TRANSCRIBING, event: OrbEvent.DEACTIVATE, to: OrbState.IDLE },
   { from: OrbState.TRANSCRIBING, event: OrbEvent.ERROR_OCCURRED, to: OrbState.ERROR },
   { from: OrbState.TRANSCRIBING, event: OrbEvent.CONNECTION_LOST, to: OrbState.DISCONNECTED },
 
   // --- THINKING ---
   { from: OrbState.THINKING, event: OrbEvent.RESPONSE_READY, to: OrbState.SPEAKING },
+  { from: OrbState.THINKING, event: OrbEvent.DEACTIVATE, to: OrbState.IDLE },
   { from: OrbState.THINKING, event: OrbEvent.ERROR_OCCURRED, to: OrbState.ERROR },
   { from: OrbState.THINKING, event: OrbEvent.CONNECTION_LOST, to: OrbState.DISCONNECTED },
 
   // --- SPEAKING ---
   { from: OrbState.SPEAKING, event: OrbEvent.SPEECH_COMPLETE, to: OrbState.IDLE },
   { from: OrbState.SPEAKING, event: OrbEvent.ACTIVATE, to: OrbState.LISTENING },
+  { from: OrbState.SPEAKING, event: OrbEvent.DEACTIVATE, to: OrbState.IDLE },
   { from: OrbState.SPEAKING, event: OrbEvent.ERROR_OCCURRED, to: OrbState.ERROR },
 
   // --- ERROR ---

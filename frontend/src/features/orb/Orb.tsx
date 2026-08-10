@@ -38,6 +38,9 @@ export function Orb() {
     } else if (orbState === OrbState.SPEAKING) {
       // Interrupt — re-activate to listen
       sendOrbEvent(OrbEvent.ACTIVATE);
+    } else if (orbState === OrbState.TRANSCRIBING || orbState === OrbState.THINKING) {
+      // Cancel
+      sendOrbEvent(OrbEvent.DEACTIVATE);
     }
   }, [orbState, sendOrbEvent]);
 

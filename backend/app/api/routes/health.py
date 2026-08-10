@@ -9,7 +9,7 @@ from typing import Any
 from app.core.config import get_settings
 from app.schemas.common import HealthResponse
 from app.database.session import get_db_session
-import app.main
+from app.core.lifecycle.state import get_uptime
 
 router = APIRouter()
 
@@ -33,6 +33,6 @@ async def check_health(db: AsyncSession = Depends(get_db_session)) -> Any:
         status="ok" if db_connected else "degraded",
         version=settings.version,
         environment=settings.environment,
-        uptime=app.main.get_uptime(),
+        uptime=get_uptime(),
         database_connected=db_connected,
     )
