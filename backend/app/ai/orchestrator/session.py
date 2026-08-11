@@ -4,6 +4,8 @@ ASTRA AI Orchestrator - Session Management
 Maintains in-memory conversation context for the current session.
 """
 
+from collections.abc import AsyncIterator
+
 from app.ai.providers.types import AIMessage, MessageRole, AIRequest
 from app.ai.providers.base import AIProvider
 from app.core.logging.logger import get_logger
@@ -48,4 +50,29 @@ class ConversationSession:
             logger.error(f"Error during AI orchestration: {e}")
             # Ensure we don't leave the user message dangling without a response if error
             self.history.pop() 
+            raise
+
+    async def chat_stream(self, user_message: str) -> AsyncIterator[str]:
+        """
+        Sends a user message, maintains history, and yields the response as a stream.
+        """
+        self.history.append(AIMessage(role=MessageRole.USER, content=user_message))
+        
+        request = AIRequest(
+            messages=self.history,
+            temperature=0.7
+        )
+        
+        full_response = []
+        try:
+            async for chunk in self.provider.generate_stream(request):
+                if chunk.content:
+                    full_response.append(chunk.content)
+                    yield chunk.content
+                    
+            # Once stream is complete, append full response to history
+            self.history.append(AIMessage(role=MessageRole.ASSISTANT, content="".join(full_response)))
+        except Exception as e:
+            logger.error(f"Error during AI streaming orchestration: {e}")
+            self.history.pop()
             raise

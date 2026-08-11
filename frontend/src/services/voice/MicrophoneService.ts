@@ -9,6 +9,10 @@ export class MicrophoneService {
   private audioChunks: Blob[] = [];
   private stream: MediaStream | null = null;
 
+  private audioContext: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private animationFrameId: number | null = null;
+
   /**
    * Request microphone permissions and start recording.
    */
@@ -24,11 +28,49 @@ export class MicrophoneService {
         }
       };
 
+      this.setupAudioAnalysis(this.stream);
       this.mediaRecorder.start();
     } catch (error) {
       console.error('Failed to access microphone:', error);
       throw error;
     }
+  }
+
+  private setupAudioAnalysis(stream: MediaStream) {
+    this.audioContext = new AudioContext();
+    const source = this.audioContext.createMediaStreamSource(stream);
+    this.analyser = this.audioContext.createAnalyser();
+    
+    this.analyser.fftSize = 256;
+    source.connect(this.analyser);
+
+    const bufferLength = this.analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    let currentLevel = 0;
+
+    const analyze = () => {
+      if (!this.analyser) return;
+      this.analyser.getByteFrequencyData(dataArray);
+      
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+      
+      // Normalize roughly between 0.0 and 1.0 (max is 255, but average speech is much lower)
+      const targetLevel = Math.min(1.0, average / 100);
+      
+      // Smooth the movement
+      currentLevel += (targetLevel - currentLevel) * 0.2;
+      
+      document.documentElement.style.setProperty('--audio-level', currentLevel.toFixed(3));
+      
+      this.animationFrameId = requestAnimationFrame(analyze);
+    };
+
+    analyze();
   }
 
   /**
@@ -53,6 +95,18 @@ export class MicrophoneService {
   }
 
   private cleanup() {
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+      this.analyser = null;
+    }
+    document.documentElement.style.setProperty('--audio-level', '0');
+
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());
       this.stream = null;

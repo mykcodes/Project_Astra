@@ -1,28 +1,27 @@
 import { useEffect, useRef } from 'react';
-import { useSystemStore } from '@/state/systemStore.ts';
 import { OrbState } from './types.ts';
 import './Particles.css';
+
+interface ParticlesProps {
+  orbState: OrbState;
+}
 
 interface Particle {
   x: number;
   y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  alpha: number;
-  targetAlpha: number;
-  life: number;
-  maxLife: number;
-  angle: number;
+  z: number;
+  baseRadius: number;
+  angle1: number;
+  angle2: number;
   speed: number;
   color: string;
 }
 
-export function Particles() {
+// Helper to interpolate values
+const lerp = (start: number, end: number, amt: number) => (1 - amt) * start + amt * end;
+
+export function Particles({ orbState }: ParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const orbState = useSystemStore((s) => s.orbState);
-  
-  // Ref to keep track of the current state without triggering re-renders in the animation loop
   const stateRef = useRef(orbState);
   
   useEffect(() => {
@@ -50,196 +49,156 @@ export function Particles() {
     window.addEventListener('resize', handleResize);
 
     const particles: Particle[] = [];
-    const MAX_PARTICLES = 150;
+    const MAX_PARTICLES = 300; // Increased for a denser orb
     let animationFrameId: number;
+    let time = 0;
 
-    const createParticle = (state: OrbState): Particle => {
-      const centerX = width / 2;
-      const centerY = height / 2;
-      
-      // Spawn particles in a ring around the orb
-      const minRadius = 80;
-      const maxRadius = 350;
-      const distance = minRadius + Math.pow(Math.random(), 2) * (maxRadius - minRadius);
-      const angle = Math.random() * Math.PI * 2;
-      
-      let speed = 0.2;
-      let color = 'hsla(220, 90%, 70%, 0.8)'; // default primary light
-      let maxLife = 100 + Math.random() * 200;
-      
-      switch (state) {
-        case OrbState.IDLE:
-          speed = 0.05 + Math.random() * 0.1;
-          color = 'hsla(220, 90%, 75%, 0.4)';
-          break;
-        case OrbState.LISTENING:
-          speed = 1.0 + Math.random() * 1.5;
-          color = 'hsla(152, 70%, 65%, 0.7)';
-          break;
-        case OrbState.TRANSCRIBING:
-          speed = 1.2 + Math.random() * 1.8;
-          color = 'hsla(190, 80%, 65%, 0.7)';
-          break;
-        case OrbState.THINKING:
-          speed = 1.5 + Math.random() * 2.0;
-          color = 'hsla(262, 80%, 75%, 0.8)';
-          break;
-        case OrbState.SPEAKING:
-          speed = 2.0 + Math.random() * 3.0;
-          color = 'hsla(200, 85%, 65%, 0.8)';
-          break;
-        case OrbState.ERROR:
-          speed = 0.1 + Math.random() * 0.2;
-          color = 'hsla(0, 72%, 65%, 0.5)';
-          break;
-        case OrbState.DISCONNECTED:
-          speed = 0.02 + Math.random() * 0.05;
-          color = 'hsla(220, 10%, 55%, 0.2)';
-          break;
-      }
+    // Smoothed transition values
+    let currentRadius = 100;
+    let currentSpeedMult = 1;
+    let currentAudioLevel = 0;
 
-      return {
-        x: centerX + Math.cos(angle) * distance,
-        y: centerY + Math.sin(angle) * distance,
-        vx: 0,
-        vy: 0,
-        radius: 0.5 + Math.random() * 2,
-        alpha: 0,
-        targetAlpha: Math.random(),
-        life: 0,
-        maxLife,
-        angle,
-        speed,
-        color
-      };
-    };
-
-    const updateParticles = () => {
-      const currentState = stateRef.current;
-      
-      // Maintain particle count
-      if (particles.length < MAX_PARTICLES && Math.random() < 0.2) {
-        particles.push(createParticle(currentState));
-      }
-
-      const centerX = width / 2;
-      const centerY = height / 2;
-
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        if (!p) continue;
-        p.life++;
-
-        if (p.life >= p.maxLife) {
-          particles.splice(i, 1);
-          continue;
-        }
-
-        // Fade in/out
-        if (p.life < p.maxLife * 0.2) {
-          p.alpha += 0.01;
-        } else if (p.life > p.maxLife * 0.8) {
-          p.alpha -= 0.01;
-        }
-
-        p.alpha = Math.max(0, Math.min(p.alpha, p.targetAlpha));
-
-        // Movement behavior based on state
-        switch (currentState) {
-          case OrbState.IDLE:
-          case OrbState.DISCONNECTED:
-          case OrbState.ERROR:
-            // Slow orbital movement
-            p.angle += p.speed * 0.005;
-            const dxIdle = p.x - centerX;
-            const dyIdle = p.y - centerY;
-            const distIdle = Math.sqrt(dxIdle * dxIdle + dyIdle * dyIdle);
-            p.x = centerX + Math.cos(p.angle) * distIdle;
-            p.y = centerY + Math.sin(p.angle) * distIdle;
-            break;
-            
-          case OrbState.LISTENING:
-            // Move smoothly towards center (attraction)
-            const dxList = centerX - p.x;
-            const dyList = centerY - p.y;
-            const distList = Math.sqrt(dxList * dxList + dyList * dyList);
-            if (distList > 80) {
-              p.x += (dxList / distList) * p.speed;
-              p.y += (dyList / distList) * p.speed;
-            }
-            p.angle += 0.02; // slight rotation as they get pulled in
-            break;
-            
-          case OrbState.TRANSCRIBING:
-            // Particles orbit inward in a tight spiral
-            p.angle += p.speed * 0.02;
-            const dxTrans = p.x - centerX;
-            const dyTrans = p.y - centerY;
-            let distTrans = Math.sqrt(dxTrans * dxTrans + dyTrans * dyTrans);
-            if (distTrans > 90) {
-              distTrans -= p.speed * 0.5;
-            } else if (distTrans < 85) {
-              distTrans += p.speed * 0.5;
-            }
-            p.x = centerX + Math.cos(p.angle) * distTrans;
-            p.y = centerY + Math.sin(p.angle) * distTrans;
-            break;
-            
-          case OrbState.THINKING:
-            // Faster orbital movement with slight wobble
-            p.angle += p.speed * 0.015;
-            const wobble = Math.sin(p.life * 0.1) * 2;
-            const dxThink = p.x - centerX;
-            const dyThink = p.y - centerY;
-            let distThink = Math.sqrt(dxThink * dxThink + dyThink * dyThink);
-            distThink += wobble * 0.2;
-            p.x = centerX + Math.cos(p.angle) * distThink;
-            p.y = centerY + Math.sin(p.angle) * distThink;
-            break;
-            
-          case OrbState.SPEAKING:
-            // Burst outwards dynamically
-            const dirX = p.x - centerX;
-            const dirY = p.y - centerY;
-            const mag = Math.sqrt(dirX * dirX + dirY * dirY);
-            if (mag > 0) {
-              // Accelerate as they move outward
-              const dynamicSpeed = p.speed * (1 + mag * 0.005);
-              p.x += (dirX / mag) * dynamicSpeed;
-              p.y += (dirY / mag) * dynamicSpeed;
-            }
-            // Add a slight sine wave to outward burst
-            p.x += Math.sin(p.life * 0.2) * 1;
-            p.y += Math.cos(p.life * 0.2) * 1;
-            break;
-        }
-      }
-    };
-
-    const drawParticles = () => {
-      ctx.clearRect(0, 0, width, height);
-      
-      particles.forEach(p => {
-        if (p.alpha <= 0) return;
-        
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        
-        // Convert the hsla string to include alpha
-        const colorWithAlpha = p.color.replace(/[\d.]+\)$/g, `${p.alpha})`);
-        
-        ctx.fillStyle = colorWithAlpha;
-        ctx.fill();
-        
-        // Add subtle glow to each particle
-        ctx.shadowBlur = p.radius * 2;
-        ctx.shadowColor = p.color;
+    // Initialize particles
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      particles.push({
+        x: 0, y: 0, z: 0,
+        baseRadius: 1 + Math.random() * 2,
+        angle1: Math.random() * Math.PI * 2,
+        angle2: Math.random() * Math.PI * 2,
+        speed: 0.005 + Math.random() * 0.015,
+        color: `hsla(${200 + Math.random() * 40}, 80%, 70%, 0.8)`
       });
-    };
+    }
 
     const renderLoop = () => {
-      updateParticles();
-      drawParticles();
+      ctx.clearRect(0, 0, width, height);
+      const state = stateRef.current;
+      time += 0.01;
+
+      // Read audio level from CSS variable set by services
+      const rawAudioLevel = parseFloat(document.documentElement.style.getPropertyValue('--audio-level')) || 0;
+      currentAudioLevel = lerp(currentAudioLevel, rawAudioLevel, 0.2);
+
+      // Define target parameters based on state
+      let targetRadius = 100;
+      let targetSpeedMult = 1;
+      let targetHue = 220;
+      let baseGlow = 0.5;
+
+      switch (state) {
+        case OrbState.IDLE:
+          targetRadius = 110;
+          targetSpeedMult = 0.5;
+          targetHue = 220;
+          baseGlow = 0.3;
+          break;
+        case OrbState.LISTENING:
+          targetRadius = 130 + currentAudioLevel * 50; // Audio reacts here
+          targetSpeedMult = 1.5 + currentAudioLevel * 2;
+          targetHue = 152; // Greenish
+          baseGlow = 0.8;
+          break;
+        case OrbState.TRANSCRIBING:
+          targetRadius = 100;
+          targetSpeedMult = 3.0; // Fast tight spin
+          targetHue = 190;
+          baseGlow = 0.6;
+          break;
+        case OrbState.THINKING:
+          targetRadius = 110 + Math.sin(time * 5) * 10; // Gentle pulse
+          targetSpeedMult = 2.0;
+          targetHue = 262; // Purple
+          baseGlow = 0.7;
+          break;
+        case OrbState.SPEAKING:
+          targetRadius = 120 + currentAudioLevel * 80;
+          targetSpeedMult = 1.0 + currentAudioLevel * 3;
+          targetHue = 200;
+          baseGlow = 0.5 + currentAudioLevel;
+          break;
+        case OrbState.ERROR:
+          targetRadius = 90;
+          targetSpeedMult = 0.2;
+          targetHue = 0; // Red
+          baseGlow = 0.4;
+          break;
+        case OrbState.DISCONNECTED:
+          targetRadius = 80;
+          targetSpeedMult = 0.1;
+          targetHue = 220;
+          baseGlow = 0.1;
+          break;
+      }
+
+      // Smooth interpolation for global physics parameters
+      currentRadius = lerp(currentRadius, targetRadius, 0.1);
+      currentSpeedMult = lerp(currentSpeedMult, targetSpeedMult, 0.1);
+
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      // Draw central atmospheric core (behind particles)
+      const coreGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, currentRadius * 1.5);
+      coreGradient.addColorStop(0, `hsla(${targetHue}, 80%, 70%, ${baseGlow * 0.4})`);
+      coreGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = coreGradient;
+      ctx.fillRect(0, 0, width, height);
+
+      // Sort particles by Z-axis for depth rendering (painters algorithm)
+      // Since we calculate Z dynamically, we just sort the array directly on render
+      // But doing it every frame is expensive, so we just calculate 3D coords and sort an index array
+      
+      const renderList = particles.map(p => {
+        // Update angles
+        p.angle1 += p.speed * currentSpeedMult;
+        p.angle2 += (p.speed * 0.5) * currentSpeedMult;
+
+        // Spherical distribution with noise
+        const r = currentRadius + Math.sin(p.angle1 * 3 + time) * 10;
+        
+        // 3D coordinates
+        const x3d = r * Math.sin(p.angle1) * Math.cos(p.angle2);
+        const y3d = r * Math.sin(p.angle1) * Math.sin(p.angle2);
+        const z3d = r * Math.cos(p.angle1);
+        
+        return { p, x3d, y3d, z3d };
+      });
+
+      renderList.sort((a, b) => a.z3d - b.z3d); // sort by depth
+
+      for (const item of renderList) {
+        const { p, x3d, y3d, z3d } = item;
+        
+        // 3D to 2D projection
+        const fov = 400;
+        const scale = fov / (fov + z3d + 200); // offset Z to push it into the screen
+        
+        const projX = centerX + x3d * scale;
+        const projY = centerY + y3d * scale;
+        
+        // Dynamic radius and opacity based on depth (Z)
+        const size = Math.max(0.1, p.baseRadius * scale * 2);
+        
+        // Near particles are brighter, far particles are dimmer
+        const depthAlpha = Math.max(0.1, Math.min(1.0, (z3d + currentRadius) / (currentRadius * 2)));
+        const finalAlpha = depthAlpha * baseGlow;
+
+        // Apply dynamic hue while keeping some variation
+        const h = targetHue + (Math.sin(p.angle1) * 20); // slight hue variance
+        
+        ctx.beginPath();
+        ctx.arc(projX, projY, size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${h}, 80%, 70%, ${finalAlpha})`;
+        ctx.fill();
+
+        if (finalAlpha > 0.4) {
+          ctx.shadowBlur = size * 2;
+          ctx.shadowColor = `hsla(${h}, 80%, 70%, ${finalAlpha})`;
+        } else {
+          ctx.shadowBlur = 0;
+        }
+      }
+
       animationFrameId = requestAnimationFrame(renderLoop);
     };
 

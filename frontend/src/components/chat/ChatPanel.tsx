@@ -31,15 +31,34 @@ export function ChatPanel() {
     setIsTyping(true);
 
     try {
-      const response = await voiceClient.sendMessage(userMsg.content);
-      const astraMsg: Message = { id: Date.now().toString() + '-resp', role: 'astra', content: response };
-      setMessages(prev => [...prev, astraMsg]);
+      const responseId = Date.now().toString() + '-resp';
+      let isFirstChunk = true;
+
+      await voiceClient.streamMessage(userMsg.content, (chunk) => {
+        if (isFirstChunk) {
+          isFirstChunk = false;
+          setIsTyping(false);
+          setMessages(prev => [...prev, { id: responseId, role: 'astra', content: chunk }]);
+        } else {
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === responseId 
+                ? { ...msg, content: msg.content + chunk } 
+                : msg
+            )
+          );
+        }
+      });
+
+      // Just in case the stream ended completely empty
+      if (isFirstChunk) {
+        setIsTyping(false);
+      }
     } catch (error) {
       console.error('Chat error:', error);
+      setIsTyping(false);
       const errorMsg: Message = { id: Date.now().toString() + '-err', role: 'astra', content: "Sorry, I encountered an error." };
       setMessages(prev => [...prev, errorMsg]);
-    } finally {
-      setIsTyping(false);
     }
   };
 
@@ -65,31 +84,20 @@ export function ChatPanel() {
             </svg>
           </button>
         </header>
-        <div className="chat-panel-content" style={{ display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto', gap: '8px', justifyContent: 'flex-start', alignItems: 'stretch' }}>
+        <div className="chat-panel-content">
           {messages.length === 0 ? (
             <p className="chat-panel-placeholder">
               Type a message to start chatting with ASTRA.
             </p>
           ) : (
             messages.map(msg => (
-              <div key={msg.id} style={{ 
-                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                backgroundColor: msg.role === 'user' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                border: msg.role === 'astra' ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                maxWidth: '85%',
-                wordBreak: 'break-word',
-                color: 'white',
-                fontSize: '14px',
-                lineHeight: '1.4'
-              }}>
+              <div key={msg.id} className={`chat-message ${msg.role}`}>
                 {msg.content}
               </div>
             ))
           )}
           {isTyping && (
-            <div style={{ alignSelf: 'flex-start', color: 'rgba(255, 255, 255, 0.5)', fontSize: '12px' }}>
+            <div className="chat-message astra typing">
               ASTRA is thinking...
             </div>
           )}

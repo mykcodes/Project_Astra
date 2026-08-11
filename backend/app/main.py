@@ -42,7 +42,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    # Future: cleanup database pool, close connections, etc.
+    # Cleanup database pool, close connections, etc.
+    from app.ai.providers import get_default_provider
+    provider = get_default_provider()
+    if hasattr(provider, "close"):
+        import inspect
+        if inspect.iscoroutinefunction(provider.close):
+            await provider.close()
+        else:
+            provider.close()
+            
     logger.info("ASTRA shutting down")
 
 

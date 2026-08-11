@@ -28,7 +28,7 @@ export class VoiceClient {
   }
 
   /**
-   * Send a message to the AI conversation orchestrator.
+   * Send a message to the AI conversation orchestrator (synchronous).
    */
   async sendMessage(text: string): Promise<string> {
     const response = await fetch(`${API_BASE}/conversation/message`, {
@@ -45,6 +45,38 @@ export class VoiceClient {
 
     const data = await response.json();
     return data.text;
+  }
+
+  /**
+   * Send a message to the AI conversation orchestrator (streaming).
+   */
+  async streamMessage(text: string, onChunk: (chunk: string) => void): Promise<void> {
+    const response = await fetch(`${API_BASE}/conversation/message/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Message stream failed: ${response.statusText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        onChunk(decoder.decode(value, { stream: true }));
+      }
+    }
   }
 
   /**

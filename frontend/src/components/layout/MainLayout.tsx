@@ -26,7 +26,8 @@ export function MainLayout({ children }: MainLayoutProps) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        minHeight: '100vh',
+        height: '100vh',
+        width: '100vw',
         position: 'relative',
         overflow: 'hidden',
       }}

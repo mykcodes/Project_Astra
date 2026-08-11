@@ -1,20 +1,21 @@
 .chat-panel-container {
   position: absolute;
-  top: 0;
-  right: -360px; /* Hide off-screen by default */
+  top: var(--space-4);
+  bottom: var(--space-4);
+  right: -400px; /* Hide off-screen by default */
   width: 360px;
-  height: 100vh;
   z-index: var(--z-overlay);
   transition: right var(--transition-spring);
-  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   background: var(--color-bg-elevated);
-  border-left: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
 }
 
 .chat-panel-container.open {
-  right: 0;
+  right: var(--space-4);
 }
 
 .chat-panel {
@@ -57,9 +58,36 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.chat-message {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  max-width: 85%;
+  word-break: break-word;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-primary);
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  background-color: var(--color-bg-tertiary);
+}
+
+.chat-message.astra {
+  align-self: flex-start;
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+}
+
+.chat-message.typing {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  border: none;
 }
 
 .chat-panel-placeholder {

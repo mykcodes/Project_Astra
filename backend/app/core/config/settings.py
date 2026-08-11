@@ -49,8 +49,28 @@ class Settings(BaseSettings):
     # AI Provider
     # ========================
     astra_ai_provider: str = "gemini"
+    
+    # Gemini
     astra_ai_model: str = "gemini-3.6-flash"
     gemini_api_key: str = ""
+    
+    # Groq
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    
+    # Local Provider
+    astra_local_enabled: bool = False
+    astra_local_runtime: str = "openai"
+    astra_local_model: str = "llama-3-8b-instruct"
+    astra_local_base_url: str = "http://localhost:1234/v1"
+    astra_local_context_length: int = 4096
+    astra_local_max_tokens: int = 1024
+    astra_local_temperature: float = 0.7
+    astra_offline_mode: bool = False
+
+    # Provider Resilience
+    astra_ai_fallback_providers: str = "groq"
+    astra_provider_cooldown_seconds: int = 60
 
     # ========================
     # Security

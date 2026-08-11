@@ -1,5 +1,5 @@
 """
-ASTRA AI Provider Provider Types
+ASTRA AI Provider Types
 
 Provider-level types that have no knowledge of domain concepts like
 Memory, Tools, or Conversations. These represent the pure contract
@@ -40,6 +40,14 @@ class ModelCapabilities:
 
 
 @dataclass
+class ModelInfo:
+    """Information about the provider and model currently in use."""
+    provider_name: str
+    model_name: str
+    capabilities: ModelCapabilities
+
+
+@dataclass
 class AIRequest:
     messages: list[AIMessage]
     model: str | None = None
@@ -52,9 +60,11 @@ class AIRequest:
 class AIResponse:
     content: str
     model: str
+    provider: str
     usage: TokenUsage
     finish_reason: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class AIResponseChunk:

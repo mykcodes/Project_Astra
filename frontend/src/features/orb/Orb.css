@@ -1,7 +1,5 @@
 /* ============================================================
-   ASTRA — Orb Styles (Refined Layered Architecture)
-   ============================================================
-   State-driven styling with depth and subtle motion.
+   ASTRA — Orb Styles
    ============================================================ */
 
 .orb-container {
@@ -9,222 +7,11 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  user-select: none;
+  width: 250px;
+  height: 250px;
   position: relative;
-  --audio-level: 0;
-}
-
-/* ========================
-   Atmospheric Glow
-   ======================== */
-
-.orb-atmospheric-glow {
-  position: absolute;
-  width: 300px;
-  height: 300px;
-  border-radius: 50%;
-  pointer-events: none;
-  filter: blur(60px);
-  z-index: 0;
-  transition: background var(--transition-orb), opacity var(--transition-orb), transform var(--transition-spring);
-  opacity: 0.3;
-}
-
-.orb-atmospheric-glow[data-state='IDLE'] {
-  background: var(--orb-color-idle);
-  animation: atmospheric-breathe var(--duration-breath) ease-in-out infinite alternate;
-}
-
-.orb-atmospheric-glow[data-state='LISTENING'] {
-  background: var(--orb-color-listening);
-  opacity: 0.6;
-  transform: scale(1.1);
-}
-
-.orb-atmospheric-glow[data-state='TRANSCRIBING'] {
-  background: hsla(190, 80%, 65%, 0.5); /* Cyan-ish */
-  opacity: 0.5;
-  animation: atmospheric-pulse var(--duration-pulse) ease-in-out infinite alternate;
-}
-
-.orb-atmospheric-glow[data-state='THINKING'] {
-  background: var(--orb-color-thinking);
-  opacity: 0.5;
-  animation: atmospheric-pulse var(--duration-pulse) ease-in-out infinite alternate;
-}
-
-.orb-atmospheric-glow[data-state='SPEAKING'] {
-  background: var(--orb-color-speaking);
-  opacity: calc(0.3 + (var(--audio-level) * 0.5));
-  transform: scale(calc(1 + (var(--audio-level) * 0.2)));
-  transition: background var(--transition-orb); /* No transition on opacity/transform to allow instant audio reaction */
-}
-
-.orb-atmospheric-glow[data-state='ERROR'] {
-  background: var(--orb-color-error);
-  opacity: 0.2;
-}
-
-.orb-atmospheric-glow[data-state='DISCONNECTED'] {
-  background: var(--color-text-muted);
-  opacity: 0.05;
-}
-
-/* ========================
-   Main Orb Container
-   ======================== */
-
-.orb {
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  position: relative;
-  z-index: 1;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform var(--transition-spring), box-shadow var(--transition-orb);
-}
-
-.orb:hover {
-  transform: scale(1.05);
-}
-
-.orb:active {
-  transform: scale(0.95);
-}
-
-.orb[data-state='LISTENING'] {
-  transform: scale(1.08);
-}
-.orb[data-state='LISTENING']:hover {
-  transform: scale(1.12);
-}
-.orb[data-state='LISTENING']:active {
-  transform: scale(1.0);
-}
-
-.orb[data-state='TRANSCRIBING'] {
-  transform: scale(1.05);
-}
-
-.orb[data-state='SPEAKING'] {
-  transform: scale(calc(1 + (var(--audio-level) * 0.15)));
-}
-
-/* ========================
-   Energy Ring
-   ======================== */
-
-.orb-energy-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  transition: all var(--transition-orb);
-  opacity: 0.8;
-}
-
-.orb[data-state='IDLE'] .orb-energy-ring {
-  border-color: hsla(220, 90%, 70%, 0.3);
-  box-shadow: inset 0 0 20px var(--orb-color-idle-glow), 0 0 15px var(--orb-color-idle-glow);
-  animation: energy-breathe var(--duration-breath) ease-in-out infinite alternate;
-}
-
-.orb[data-state='LISTENING'] .orb-energy-ring {
-  border-color: hsla(152, 80%, 70%, 0.6);
-  box-shadow: inset 0 0 30px var(--orb-color-listening-glow), 0 0 25px var(--orb-color-listening-glow);
-}
-
-.orb[data-state='TRANSCRIBING'] .orb-energy-ring {
-  border-color: hsla(190, 80%, 70%, 0.5);
-  box-shadow: inset 0 0 25px hsla(190, 80%, 60%, 0.8), 0 0 20px hsla(190, 80%, 60%, 0.8);
-  animation: energy-spin 2s linear infinite reverse;
-  border-left-color: transparent;
-  border-right-color: transparent;
-}
-
-.orb[data-state='THINKING'] .orb-energy-ring {
-  border-color: hsla(262, 80%, 75%, 0.5);
-  box-shadow: inset 0 0 20px var(--orb-color-thinking-glow), 0 0 20px var(--orb-color-thinking-glow);
-  animation: energy-spin 3s linear infinite;
-  border-top-color: transparent;
-  border-bottom-color: transparent;
-}
-
-.orb[data-state='SPEAKING'] .orb-energy-ring {
-  border-color: hsla(200, 85%, 70%, calc(0.4 + (var(--audio-level) * 0.6)));
-  box-shadow: inset 0 0 30px var(--orb-color-speaking-glow), 0 0 calc(10px + (var(--audio-level) * 40px)) var(--orb-color-speaking-glow);
-  transition: border-color var(--transition-orb);
-}
-
-.orb[data-state='ERROR'] .orb-energy-ring {
-  border-color: hsla(0, 72%, 60%, 0.4);
-  box-shadow: inset 0 0 15px var(--orb-color-error-glow);
-}
-
-.orb[data-state='DISCONNECTED'] .orb-energy-ring {
-  border-color: hsla(220, 10%, 45%, 0.2);
-  box-shadow: inset 0 0 10px var(--orb-color-disconnected-glow);
-}
-
-/* ========================
-   Core
-   ======================== */
-
-.orb-core {
-  width: 90px;
-  height: 90px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #fff 0%, transparent 60%);
-  transition: all var(--transition-orb);
-  position: relative;
-  z-index: 2;
-}
-
-.orb[data-state='IDLE'] .orb-core {
-  background-color: var(--orb-color-idle);
-  box-shadow: 0 0 30px var(--orb-color-idle);
-  animation: core-breathe var(--duration-breath) ease-in-out infinite alternate;
-}
-
-.orb[data-state='LISTENING'] .orb-core {
-  background-color: var(--orb-color-listening);
-  box-shadow: 0 0 40px var(--orb-color-listening), 0 0 80px var(--orb-color-listening);
-  transform: scale(1.1);
-}
-
-.orb[data-state='TRANSCRIBING'] .orb-core {
-  background-color: hsla(190, 80%, 65%, 1);
-  box-shadow: 0 0 30px hsla(190, 80%, 65%, 0.8);
-  animation: core-pulse var(--duration-breath) ease-in-out infinite alternate;
-}
-
-.orb[data-state='THINKING'] .orb-core {
-  background-color: var(--orb-color-thinking);
-  box-shadow: 0 0 35px var(--orb-color-thinking);
-  animation: core-pulse var(--duration-pulse) ease-in-out infinite alternate;
-}
-
-.orb[data-state='SPEAKING'] .orb-core {
-  background-color: var(--orb-color-speaking);
-  box-shadow: 0 0 calc(30px + (var(--audio-level) * 50px)) var(--orb-color-speaking);
-  transform: scale(calc(1 + (var(--audio-level) * 0.2)));
-  transition: background-color var(--transition-orb);
-}
-
-.orb[data-state='ERROR'] .orb-core {
-  background-color: var(--orb-color-error);
-  box-shadow: 0 0 20px var(--orb-color-error);
-  opacity: 0.8;
-}
-
-.orb[data-state='DISCONNECTED'] .orb-core {
-  background-color: var(--color-text-muted);
-  box-shadow: 0 0 10px var(--color-text-muted);
-  opacity: 0.3;
+  user-select: none;
 }
 
 /* ========================
@@ -232,7 +19,10 @@
    ======================== */
 
 .orb-state-label {
-  margin-top: var(--space-10);
+  position: absolute;
+  bottom: -40px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   letter-spacing: 0.2em;
@@ -240,53 +30,4 @@
   font-weight: var(--font-weight-medium);
   transition: color var(--transition-orb), opacity var(--transition-orb);
   z-index: 10;
-}
-
-/* ========================
-   Animations
-   ======================== */
-
-@keyframes atmospheric-breathe {
-  0% { transform: scale(0.95); opacity: 0.25; }
-  100% { transform: scale(1.05); opacity: 0.4; }
-}
-
-@keyframes atmospheric-pulse {
-  0% { transform: scale(0.9); opacity: 0.3; }
-  100% { transform: scale(1.1); opacity: 0.6; }
-}
-
-@keyframes energy-breathe {
-  0% { transform: scale(0.98); opacity: 0.7; }
-  100% { transform: scale(1.02); opacity: 1; }
-}
-
-@keyframes energy-spin {
-  0% { transform: rotate(0deg) scale(1); }
-  50% { transform: rotate(180deg) scale(1.05); }
-  100% { transform: rotate(360deg) scale(1); }
-}
-
-@keyframes core-breathe {
-  0% { transform: scale(0.96); opacity: 0.9; }
-  100% { transform: scale(1.04); opacity: 1; }
-}
-
-@keyframes core-pulse {
-  0% { transform: scale(0.9); }
-  100% { transform: scale(1.08); }
-}
-
-/* ========================
-   Reduced motion
-   ======================== */
-
-@media (prefers-reduced-motion: reduce) {
-  .orb,
-  .orb-atmospheric-glow,
-  .orb-energy-ring,
-  .orb-core {
-    animation: none !important;
-    transition-duration: 200ms !important;
-  }
 }
