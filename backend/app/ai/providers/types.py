@@ -19,9 +19,36 @@ class MessageRole(str, Enum):
 
 
 @dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class ToolResult:
+    tool_call_id: str
+    name: str
+    success: bool
+    result: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class ToolDefinition:
+    name: str
+    description: str
+    parameters: dict[str, Any]  # JSON schema of parameters
+    risk: str = "SAFE" # Storing the risk level string
+
+
+@dataclass
 class AIMessage:
     role: MessageRole
     content: str
+    tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 @dataclass
@@ -54,6 +81,7 @@ class AIRequest:
     temperature: float = 0.7
     max_tokens: int | None = None
     stop_sequences: list[str] | None = None
+    tools: list[ToolDefinition] | None = None
 
 
 @dataclass
@@ -64,6 +92,7 @@ class AIResponse:
     usage: TokenUsage
     finish_reason: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    tool_calls: list[ToolCall] | None = None
 
 
 @dataclass
@@ -71,3 +100,4 @@ class AIResponseChunk:
     content: str
     is_done: bool = False
     usage: TokenUsage | None = None
+    tool_calls: list[ToolCall] | None = None

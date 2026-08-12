@@ -89,9 +89,26 @@ class Settings(BaseSettings):
     astra_feature_voice: bool = False
     astra_feature_memory: bool = False
     astra_feature_knowledge: bool = False
-    astra_feature_tools: bool = False
+    astra_feature_tools: bool = True
     astra_feature_agents: bool = False
     astra_feature_notch: bool = False
+
+    # ========================
+    # Voice / STT
+    # ========================
+    astra_stt_provider: str = "gemini"
+    astra_tts_provider: str = "gtts"
+    astra_local_stt_model: str = "base.en"
+    astra_local_stt_device: str = "cuda"
+    astra_local_stt_compute_type: str = "float16"
+
+    # ========================
+    # Tool Engine
+    # ========================
+    astra_tools_enabled: bool = True
+    astra_tool_max_calls_per_turn: int = 5
+    astra_tool_allowed_apps: str = "{}"
+    astra_tool_allowed_fs_root: str = ""
 
     # ========================
     # Computed Properties

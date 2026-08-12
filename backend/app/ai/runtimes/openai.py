@@ -8,6 +8,7 @@ from app.ai.providers.types import (
     AIResponse,
     AIResponseChunk,
     TokenUsage,
+    ToolCall,
 )
 from app.ai.providers.errors import ProviderUnavailableError
 from app.core.logging.logger import get_logger
@@ -48,15 +49,63 @@ class OpenAICompatibleRuntime:
 
     def _build_payload(self, request: AIRequest, configured_model: str, default_max_tokens: int, default_temperature: float, stream: bool = False) -> dict[str, Any]:
         model_name = request.model or configured_model
+        
+        messages = []
+        for msg in request.messages:
+            if msg.role == "tool":
+                messages.append({
+                    "role": "tool",
+                    "content": msg.content,
+                    "tool_call_id": msg.tool_call_id
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                openai_tool_calls = []
+                for call in msg.tool_calls:
+                    openai_tool_calls.append({
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(call.arguments)
+                        }
+                    })
+                msg_dict = {
+                    "role": "assistant",
+                    "tool_calls": openai_tool_calls
+                }
+                if msg.content:
+                    msg_dict["content"] = msg.content
+                messages.append(msg_dict)
+            else:
+                messages.append({
+                    "role": msg.role.value,
+                    "content": msg.content
+                })
+
         payload = {
             "model": model_name,
-            "messages": [{"role": msg.role.value, "content": msg.content} for msg in request.messages],
+            "messages": messages,
             "temperature": request.temperature if request.temperature is not None else default_temperature,
             "max_tokens": request.max_tokens if request.max_tokens is not None else default_max_tokens,
             "stream": stream,
             "reasoning": False,
             "reasoning_effort": "none"
         }
+        
+        if request.tools:
+            openai_tools = []
+            for tool in request.tools:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                })
+            payload["tools"] = openai_tools
+            payload["tool_choice"] = "auto"
+            
         if request.stop_sequences:
             payload["stop"] = request.stop_sequences
         return payload, model_name
@@ -80,6 +129,21 @@ class OpenAICompatibleRuntime:
             content = message.get("content", "")
             finish_reason = choices[0].get("finish_reason", "stop")
             
+            tool_calls = None
+            if message.get("tool_calls"):
+                tool_calls = []
+                for tc in message.get("tool_calls", []):
+                    args = {}
+                    try:
+                        args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+                    except:
+                        pass
+                    tool_calls.append(ToolCall(
+                        id=tc.get("id", ""),
+                        name=tc.get("function", {}).get("name", ""),
+                        arguments=args
+                    ))
+            
             usage_data = data.get("usage", {})
             usage = TokenUsage(
                 prompt_tokens=usage_data.get("prompt_tokens", 0),
@@ -101,12 +165,13 @@ class OpenAICompatibleRuntime:
             )
             
             return AIResponse(
-                content=content,
+                content=content or "",
                 model=model_name,
                 provider=fallback_provider_name,
                 usage=usage,
                 finish_reason=finish_reason,
-                metadata={"provider_runtime": "openai_compatible"}
+                metadata={"provider_runtime": "openai_compatible"},
+                tool_calls=tool_calls
             )
             
         except httpx.RequestError as exc:
@@ -122,6 +187,7 @@ class OpenAICompatibleRuntime:
         
         start_time = time.time()
         first_token_time = None
+        tool_calls_buffer = {}
         
         try:
             async with self.client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as response:
@@ -146,6 +212,23 @@ class OpenAICompatibleRuntime:
                             delta = choices[0].get("delta", {})
                             content = delta.get("content", "")
                             reasoning_content = delta.get("reasoning_content", "")
+                            
+                            if "tool_calls" in delta:
+                                for tc in delta["tool_calls"]:
+                                    idx = tc.get("index")
+                                    if idx not in tool_calls_buffer:
+                                        tool_calls_buffer[idx] = {
+                                            "id": tc.get("id", ""),
+                                            "name": tc.get("function", {}).get("name", ""),
+                                            "arguments": tc.get("function", {}).get("arguments", "")
+                                        }
+                                    else:
+                                        if tc.get("id"):
+                                            tool_calls_buffer[idx]["id"] += tc["id"]
+                                        if tc.get("function", {}).get("name"):
+                                            tool_calls_buffer[idx]["name"] += tc["function"]["name"]
+                                        if tc.get("function", {}).get("arguments"):
+                                            tool_calls_buffer[idx]["arguments"] += tc["function"]["arguments"]
                             
                             chunk_text = content or reasoning_content
                             
@@ -174,7 +257,23 @@ class OpenAICompatibleRuntime:
                 }
             )
             
-            yield AIResponseChunk(content="", is_done=True)
+            tool_calls = None
+            if tool_calls_buffer:
+                tool_calls = []
+                for idx in sorted(tool_calls_buffer.keys()):
+                    buf = tool_calls_buffer[idx]
+                    args = {}
+                    try:
+                        args = json.loads(buf["arguments"])
+                    except:
+                        pass
+                    tool_calls.append(ToolCall(
+                        id=buf["id"],
+                        name=buf["name"],
+                        arguments=args
+                    ))
+            
+            yield AIResponseChunk(content="", is_done=True, tool_calls=tool_calls)
             
         except httpx.RequestError as exc:
             logger.error(f"Local runtime stream request failed: {exc}")

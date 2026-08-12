@@ -4,14 +4,25 @@ from pydantic import BaseModel
 
 from app.voice.types import TranscriptionRequest, AudioFormat, SynthesisRequest
 from app.voice.stt.gemini_stt import GeminiSTTProvider
+from app.voice.stt.openai_stt import OpenAISTTProvider
+from app.voice.stt.whisper_stt import LocalWhisperSTTProvider
+from app.voice.stt.groq_stt import GroqSTTProvider
 from app.voice.tts.gtts_provider import GTTSProvider
 from app.core.logging.logger import get_logger
+from app.core.config import get_settings
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
 
-stt_provider = GeminiSTTProvider()
+settings = get_settings()
+if settings.astra_stt_provider == "local":
+    stt_provider = LocalWhisperSTTProvider()
+elif settings.astra_stt_provider == "groq":
+    stt_provider = GroqSTTProvider()
+else:
+    stt_provider = GeminiSTTProvider()
+    
 tts_provider = GTTSProvider()
 
 class SynthesizeRequestModel(BaseModel):

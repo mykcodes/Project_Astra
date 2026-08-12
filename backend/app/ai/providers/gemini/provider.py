@@ -25,6 +25,7 @@ from app.ai.providers.types import (
     ModelCapabilities,
     ModelInfo,
     TokenUsage,
+    ToolCall,
 )
 from app.core.config import get_settings
 from app.core.logging.logger import get_logger
@@ -67,12 +68,53 @@ class GeminiProvider(AIProvider):
         for msg in request.messages:
             if msg.role == "system":
                 system_instruction = msg.content
+            elif msg.role == "tool":
+                import json
+                try:
+                    response_dict = json.loads(msg.content)
+                except json.JSONDecodeError:
+                    response_dict = {"result": msg.content}
+                
+                messages.append(types.Content(
+                    role="user",
+                    parts=[types.Part(
+                        function_response=types.FunctionResponse(
+                            name=msg.name or "unknown",
+                            response=response_dict
+                        )
+                    )]
+                ))
+            elif msg.role == "assistant":
+                parts = []
+                if msg.content:
+                    parts.append(types.Part.from_text(text=msg.content))
+                if msg.tool_calls:
+                    for call in msg.tool_calls:
+                        parts.append(types.Part(
+                            function_call=types.FunctionCall(
+                                name=call.name,
+                                args=call.arguments
+                            )
+                        ))
+                messages.append(types.Content(role="model", parts=parts))
             else:
-                role = "user" if msg.role == "user" else "model"
+                role = "user"
                 messages.append(types.Content(
                     role=role,
                     parts=[types.Part.from_text(text=msg.content)],
                 ))
+
+        gemini_tools = None
+        if request.tools:
+            func_decls = []
+            for tool in request.tools:
+                func_decls.append(types.FunctionDeclaration(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                ))
+            if func_decls:
+                gemini_tools = [types.Tool(function_declarations=func_decls)]
 
         model_name = request.model or self.default_model
         logger.info(f"AI_REQUEST_STARTED: provider=gemini model={model_name}")
@@ -87,6 +129,7 @@ class GeminiProvider(AIProvider):
                     temperature=request.temperature or 0.7,
                     max_output_tokens=request.max_tokens,
                     system_instruction=system_instruction,
+                    tools=gemini_tools,
                 ),
             )
         except Exception as exc:
@@ -108,13 +151,42 @@ class GeminiProvider(AIProvider):
                 total_tokens=response.usage_metadata.total_token_count or 0,
             )
 
+        tool_calls = None
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+            tool_calls = []
+            for part in response.candidates[0].content.parts:
+                if part.function_call:
+                    import uuid
+                    # The args might be a dict or a protobuf struct, we convert to dict
+                    args = part.function_call.args
+                    if hasattr(args, "items"):
+                        args = dict(args)
+                    else:
+                        args = dict(args) if args else {}
+                        
+                    tool_calls.append(ToolCall(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        name=part.function_call.name,
+                        arguments=args
+                    ))
+            if not tool_calls:
+                tool_calls = None
+
+        # Fix text being None when there is only a function call
+        content = ""
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.text:
+                    content += part.text
+
         return AIResponse(
-            content=response.text or "",
+            content=content,
             model=model_name,
             provider="gemini",
             usage=usage,
             finish_reason="stop",
             metadata={"latency_ms": round(latency_ms, 1)},
+            tool_calls=tool_calls
         )
 
     async def generate_stream(

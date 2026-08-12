@@ -24,6 +24,7 @@ from app.ai.providers.types import (
     ModelCapabilities,
     ModelInfo,
     TokenUsage,
+    ToolCall,
 )
 from app.core.config import get_settings
 from app.core.logging.logger import get_logger
@@ -66,11 +67,49 @@ class GroqProvider(AIProvider):
         # Map ASTRA messages to Groq/OpenAI compatible format
         messages = []
         for msg in request.messages:
-            # Groq uses standard roles: "system", "user", "assistant"
-            messages.append({
-                "role": msg.role.value,
-                "content": msg.content
-            })
+            if msg.role == "tool":
+                messages.append({
+                    "role": "tool",
+                    "content": msg.content,
+                    "tool_call_id": msg.tool_call_id
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                groq_tool_calls = []
+                for call in msg.tool_calls:
+                    import json
+                    groq_tool_calls.append({
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(call.arguments)
+                        }
+                    })
+                msg_dict = {
+                    "role": "assistant",
+                    "tool_calls": groq_tool_calls
+                }
+                if msg.content:
+                    msg_dict["content"] = msg.content
+                messages.append(msg_dict)
+            else:
+                messages.append({
+                    "role": msg.role.value,
+                    "content": msg.content
+                })
+
+        groq_tools = None
+        if request.tools:
+            groq_tools = []
+            for tool in request.tools:
+                groq_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                })
 
         # Do NOT reuse ASTRA_AI_MODEL from request if we don't have to,
         # but if the user explicitly configures a model we should honor it,
@@ -82,14 +121,38 @@ class GroqProvider(AIProvider):
 
         start = time.perf_counter()
 
+        kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": request.temperature or 0.7,
+            "max_tokens": request.max_tokens,
+            "stop": request.stop_sequences,
+        }
+        if groq_tools:
+            kwargs["tools"] = groq_tools
+            kwargs["tool_choice"] = "auto"
+
         try:
-            response = await self.client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                temperature=request.temperature or 0.7,
-                max_tokens=request.max_tokens,
-                stop=request.stop_sequences,
-            )
+            response = await self.client.chat.completions.create(**kwargs)
+        except groq.BadRequestError as exc:
+            latency_ms = (time.perf_counter() - start) * 1000
+            err_dict = getattr(exc, "body", {})
+            if isinstance(err_dict, dict) and err_dict.get("error", {}).get("code") == "tool_use_failed":
+                failed_gen = err_dict.get("error", {}).get("failed_generation", "")
+                logger.warning(
+                    "Groq tool validation failed. Returning failed generation as text.",
+                    extra={"failed_generation": failed_gen}
+                )
+                return AIResponse(
+                    content=failed_gen,
+                    model=model_name,
+                    provider="groq",
+                    usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+                    finish_reason="stop",
+                    metadata={"latency_ms": round(latency_ms, 1)},
+                    tool_calls=None
+                )
+            self._handle_api_error(exc, latency_ms)
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
             self._handle_api_error(exc, latency_ms)
@@ -103,6 +166,22 @@ class GroqProvider(AIProvider):
 
         content = response.choices[0].message.content or ""
         finish_reason = response.choices[0].finish_reason or "stop"
+        
+        tool_calls = None
+        if response.choices[0].message.tool_calls:
+            import json
+            tool_calls = []
+            for tc in response.choices[0].message.tool_calls:
+                args = {}
+                try:
+                    args = json.loads(tc.function.arguments)
+                except:
+                    pass
+                tool_calls.append(ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=args
+                ))
         
         usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
         if response.usage:
@@ -119,6 +198,7 @@ class GroqProvider(AIProvider):
             usage=usage,
             finish_reason=finish_reason,
             metadata={"latency_ms": round(latency_ms, 1)},
+            tool_calls=tool_calls
         )
 
     async def generate_stream(
