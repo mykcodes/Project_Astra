@@ -4,7 +4,8 @@ from typing import List, Dict
 
 from app.tools.base import Tool
 from app.tools.schemas import ToolRisk
-from app.tools.errors import ToolPermissionError, ToolExecutionError
+from app.tools.errors import ToolPermissionError, ToolExecutionError, ToolValidationError
+from app.core.config import get_settings
 from app.core.config import get_settings
 
 def get_allowed_root() -> Path:
@@ -53,6 +54,9 @@ class ListDirectoryTool(Tool):
     }
 
     async def execute(self, path: str = ".", **kwargs) -> Dict[str, List[str]]:
+        if not isinstance(path, str):
+            raise ToolValidationError("Path must be a string.")
+            
         root = get_allowed_root()
         target = resolve_and_verify_path(path, root)
         
@@ -96,6 +100,9 @@ class SearchFilesTool(Tool):
     }
 
     async def execute(self, query: str, path: str = ".", **kwargs) -> List[str]:
+        if not isinstance(query, str) or not isinstance(path, str):
+            raise ToolValidationError("Query and path must be strings.")
+            
         root = get_allowed_root()
         target = resolve_and_verify_path(path, root)
         
@@ -134,6 +141,9 @@ class CreateFolderTool(Tool):
     }
 
     async def execute(self, path: str, **kwargs) -> dict:
+        if not isinstance(path, str):
+            raise ToolValidationError("Path must be a string.")
+            
         root = get_allowed_root()
         target = resolve_and_verify_path(path, root)
         

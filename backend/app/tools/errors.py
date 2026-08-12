@@ -19,3 +19,7 @@ class ToolExecutionError(ToolError):
 class ToolPermissionError(ToolError):
     """Raised when a tool is blocked due to permission/security policies."""
     pass
+
+class ToolTimeoutError(ToolError):
+    """Raised when a tool execution exceeds the configured timeout."""
+    pass

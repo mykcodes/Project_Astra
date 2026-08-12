@@ -5,6 +5,7 @@ Maintains in-memory conversation context for the current session.
 """
 
 from collections.abc import AsyncIterator
+import json
 
 from app.ai.providers.types import AIMessage, MessageRole, AIRequest
 from app.ai.providers.base import AIProvider
@@ -44,6 +45,8 @@ class ConversationSession:
         max_calls = settings.astra_tool_max_calls_per_turn
         
         try:
+            turn_executed_calls = set()
+            
             for _ in range(max_calls):
                 tools = [t.get_definition() for t in registry.list_tools()] if settings.astra_tools_enabled else None
                 request = AIRequest(
@@ -64,6 +67,26 @@ class ConversationSession:
                     
                 # Execute tool calls
                 for tool_call in response.tool_calls:
+                    # Duplicate check
+                    args_str = json.dumps(tool_call.arguments, sort_keys=True) if isinstance(tool_call.arguments, dict) else str(tool_call.arguments)
+                    call_signature = (tool_call.name, args_str)
+                    
+                    if call_signature in turn_executed_calls:
+                        logger.warning("TOOL_CALL_DUPLICATE_BLOCKED", extra={"tool_name": tool_call.name})
+                        error_payload = json.dumps({
+                            "error_type": "DUPLICATE_CALL_BLOCKED",
+                            "message": "This action was blocked because you already performed the exact same action with the same arguments in this turn."
+                        })
+                        self.history.append(AIMessage(
+                            role=MessageRole.TOOL,
+                            content=error_payload,
+                            tool_call_id=tool_call.id,
+                            name=tool_call.name
+                        ))
+                        continue
+                        
+                    turn_executed_calls.add(call_signature)
+                    
                     result = await executor.execute(tool_call)
                     self.history.append(AIMessage(
                         role=MessageRole.TOOL,
@@ -90,6 +113,8 @@ class ConversationSession:
         max_calls = settings.astra_tool_max_calls_per_turn
         
         try:
+            turn_executed_calls = set()
+            
             for _ in range(max_calls):
                 tools = [t.get_definition() for t in registry.list_tools()] if settings.astra_tools_enabled else None
                 request = AIRequest(
@@ -120,6 +145,26 @@ class ConversationSession:
                     
                 # Execute tool calls and continue loop
                 for tool_call in tool_calls_buffered:
+                    # Duplicate check
+                    args_str = json.dumps(tool_call.arguments, sort_keys=True) if isinstance(tool_call.arguments, dict) else str(tool_call.arguments)
+                    call_signature = (tool_call.name, args_str)
+                    
+                    if call_signature in turn_executed_calls:
+                        logger.warning("TOOL_CALL_DUPLICATE_BLOCKED", extra={"tool_name": tool_call.name})
+                        error_payload = json.dumps({
+                            "error_type": "DUPLICATE_CALL_BLOCKED",
+                            "message": "This action was blocked because you already performed the exact same action with the same arguments in this turn."
+                        })
+                        self.history.append(AIMessage(
+                            role=MessageRole.TOOL,
+                            content=error_payload,
+                            tool_call_id=tool_call.id,
+                            name=tool_call.name
+                        ))
+                        continue
+                        
+                    turn_executed_calls.add(call_signature)
+                    
                     result = await executor.execute(tool_call)
                     self.history.append(AIMessage(
                         role=MessageRole.TOOL,

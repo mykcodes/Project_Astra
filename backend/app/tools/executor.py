@@ -2,12 +2,15 @@ import asyncio
 import json
 import time
 from typing import Any
+import jsonschema
+from jsonschema.exceptions import ValidationError
 
 from app.tools.registry import registry
-from app.tools.errors import ToolError, ToolNotFoundError, ToolValidationError, ToolExecutionError, ToolPermissionError
+from app.tools.errors import ToolError, ToolNotFoundError, ToolValidationError, ToolExecutionError, ToolPermissionError, ToolTimeoutError
 from app.ai.providers.types import ToolCall, ToolResult
 from app.core.logging.logger import get_logger
 from app.tools.schemas import ToolRisk
+from app.core.config import get_settings
 
 logger = get_logger(__name__)
 
@@ -19,34 +22,49 @@ class ToolExecutor:
         """Executes a tool call safely and returns a ToolResult."""
         
         start_time = time.perf_counter()
+        settings = get_settings()
+        
+        logger.info(
+            "TOOL_CALL_RECEIVED",
+            extra={"tool_name": tool_call.name, "tool_call_id": tool_call.id}
+        )
         
         try:
             # 1. Locate tool
             tool = self.registry.get(tool_call.name)
             
+            logger.info("TOOL_PERMISSION_CHECKED", extra={"tool_name": tool_call.name, "risk": tool.risk})
+
+            # 2. Check risk/permissions
+            if tool.risk == ToolRisk.BLOCKED:
+                raise ToolPermissionError(f"Tool {tool.name} is blocked.")
+                
+            # 3. Validate arguments
+            logger.info("TOOL_VALIDATION_STARTED", extra={"tool_name": tool_call.name})
+            
+            if not isinstance(tool_call.arguments, dict):
+                logger.warning("TOOL_VALIDATION_FAILED", extra={"tool_name": tool_call.name, "error": "Arguments must be a dictionary"})
+                raise ToolValidationError("Arguments must be a dictionary.")
+                
+            try:
+                jsonschema.validate(instance=tool_call.arguments, schema=tool.schema)
+            except ValidationError as ve:
+                logger.warning("TOOL_VALIDATION_FAILED", extra={"tool_name": tool_call.name, "error": str(ve)})
+                raise ToolValidationError(f"Invalid arguments for '{tool.name}': {ve.message}")
+                
+            # 4. Execute tool
             logger.info(
                 "TOOL_EXECUTION_STARTED", 
                 extra={"tool_name": tool_call.name, "tool_call_id": tool_call.id}
             )
-
-            # 2. Check risk/permissions (For Phase 4.1, we assume all registered tools are permitted, 
-            # but tools like OpenApplicationTool will do their own config checks).
-            if tool.risk == ToolRisk.BLOCKED:
-                raise ToolPermissionError(f"Tool {tool.name} is blocked.")
-                
-            # 3. Validate arguments (basic structural validation)
-            if not isinstance(tool_call.arguments, dict):
-                raise ToolValidationError("Arguments must be a dictionary.")
-                
-            # 4. Execute tool
+            
             try:
-                # Add a reasonable timeout for safety (e.g. 30 seconds)
                 result_data = await asyncio.wait_for(
                     tool.execute(**tool_call.arguments),
-                    timeout=30.0
+                    timeout=float(settings.astra_tool_execution_timeout_seconds)
                 )
             except asyncio.TimeoutError:
-                raise ToolExecutionError("Tool execution timed out.")
+                raise ToolTimeoutError(f"Tool execution timed out after {settings.astra_tool_execution_timeout_seconds} seconds.")
             except Exception as e:
                 # Catch internal errors of the tool
                 if isinstance(e, ToolError):
@@ -59,6 +77,11 @@ class ToolExecutor:
                 result_str = json.dumps(result_data)
             else:
                 result_str = str(result_data)
+                
+            # Enforce max result size
+            max_chars = settings.astra_tool_max_result_chars
+            if len(result_str) > max_chars:
+                result_str = result_str[:max_chars] + "... [Result truncated due to size limits]"
                 
             duration = time.perf_counter() - start_time
             logger.info(
@@ -73,6 +96,18 @@ class ToolExecutor:
                 result=result_str
             )
             
+        except ToolTimeoutError as e:
+            duration = time.perf_counter() - start_time
+            logger.warning(
+                "TOOL_EXECUTION_TIMEOUT",
+                extra={"tool_name": tool_call.name, "duration_sec": duration}
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                success=False,
+                error=json.dumps({"error_type": "TOOL_TIMEOUT", "message": str(e)})
+            )
         except ToolError as e:
             duration = time.perf_counter() - start_time
             logger.warning(
@@ -83,20 +118,20 @@ class ToolExecutor:
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
                 success=False,
-                error=str(e)
+                error=json.dumps({"error_type": type(e).__name__, "message": str(e)})
             )
         except Exception as e:
             # Uncaught exceptions
             duration = time.perf_counter() - start_time
             logger.error(
-                "TOOL_EXECUTION_CRASHED",
+                "TOOL_EXECUTION_FAILED",
                 extra={"tool_name": tool_call.name, "error": str(e), "duration_sec": duration}
             )
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
                 success=False,
-                error=f"Unexpected error: {str(e)}"
+                error=json.dumps({"error_type": "UNEXPECTED_ERROR", "message": f"Unexpected error: {str(e)}"})
             )
 
 executor = ToolExecutor()

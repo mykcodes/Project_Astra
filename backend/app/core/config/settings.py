@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     astra_tool_max_calls_per_turn: int = 5
     astra_tool_allowed_apps: str = "{}"
     astra_tool_allowed_fs_root: str = ""
+    astra_tool_execution_timeout_seconds: int = 15
+    astra_tool_max_result_chars: int = 12000
 
     # ========================
     # Computed Properties

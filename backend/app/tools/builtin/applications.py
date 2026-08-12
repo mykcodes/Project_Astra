@@ -30,6 +30,9 @@ class OpenApplicationTool(Tool):
     }
 
     async def execute(self, application: str, **kwargs) -> dict:
+        if not isinstance(application, str):
+            return {"success": False, "message": "Application name must be a string."}
+            
         settings = get_settings()
         allowed_apps_str = getattr(settings, "astra_tool_allowed_apps", "{}")
         
@@ -105,6 +108,9 @@ class OpenUrlTool(Tool):
     }
 
     async def execute(self, url: str, **kwargs) -> dict:
+        if not isinstance(url, str):
+            raise ToolPermissionError("URL must be a string.")
+            
         parsed = urlparse(url)
         if parsed.scheme not in ["http", "https"]:
             raise ToolPermissionError(f"URL scheme '{parsed.scheme}' is not allowed. Only http and https are permitted.")
