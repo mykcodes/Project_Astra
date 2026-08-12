@@ -110,7 +110,7 @@ class LocalProvider(AIProvider):
         return ModelCapabilities(
             max_context_tokens=self.context_length,
             supports_streaming=True,
-            supports_function_calling=False,
+            supports_function_calling=True,
             supports_vision=False
         )
 

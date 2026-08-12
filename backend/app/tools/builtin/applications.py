@@ -1,5 +1,7 @@
 import asyncio
 import json
+import sys
+import subprocess
 import webbrowser
 from urllib.parse import urlparse
 from app.tools.base import Tool
@@ -9,7 +11,11 @@ from app.core.config import get_settings
 
 class OpenApplicationTool(Tool):
     name = "open_application"
-    description = "Opens a desktop application based on an explicitly allowed list."
+    description = (
+        "Opens a desktop application based on an explicitly allowed list. "
+        "Use this tool to actually launch an application when the user asks to open it. "
+        "Do NOT provide conversational instructions on how to open it."
+    )
     risk = ToolRisk.CONTROLLED
     schema = {
         "type": "object",
@@ -33,24 +39,54 @@ class OpenApplicationTool(Tool):
             allowed_apps = {}
             
         app_key = application.lower()
-        if app_key not in allowed_apps:
-            raise ToolPermissionError(f"Application '{application}' is not allowlisted.")
-            
-        executable = allowed_apps[app_key]
+        executable = None
+        matched_app_name = None
         
+        for key, val in allowed_apps.items():
+            if isinstance(val, dict):
+                aliases = [a.lower() for a in val.get("aliases", [])]
+                if app_key == key.lower() or app_key in aliases:
+                    executable = val.get("path")
+                    matched_app_name = key
+                    break
+            elif isinstance(val, str):
+                if app_key == key.lower():
+                    executable = val
+                    matched_app_name = key
+                    break
+                    
+        if not executable:
+            return {"success": False, "message": f"Application '{application}' is not configured in the ASTRA application allowlist."}
+            
         try:
-            # We use subprocess directly but only with allowlisted executable commands
-            process = await asyncio.create_subprocess_exec(
-                executable,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-            # We don't wait for the process to exit because it's a desktop app
-            return {"success": True, "message": f"Opened {application} (PID: {process.pid})"}
-        except FileNotFoundError:
-            raise ToolExecutionError(f"Executable for '{application}' not found: {executable}")
+            if sys.platform == "win32":
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                process = subprocess.Popen(
+                    [executable],
+                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                )
+            else:
+                process = subprocess.Popen(
+                    [executable],
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            
+            return {"success": True, "message": f"Application '{matched_app_name}' launched successfully."}
+        except FileNotFoundError as e:
+            return {
+                "success": False,
+                "message": f"Failed to launch '{matched_app_name}'.",
+                "error": f"FileNotFoundError: Executable not found at {executable}"
+            }
         except Exception as e:
-            raise ToolExecutionError(f"Failed to open '{application}': {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to launch '{matched_app_name}'.",
+                "error": f"{type(e).__name__}: {str(e)}"
+            }
 
 class OpenUrlTool(Tool):
     name = "open_url"
