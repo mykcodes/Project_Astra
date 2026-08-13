@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     astra_tool_allowed_fs_root: str = ""
     astra_tool_execution_timeout_seconds: int = 15
     astra_tool_max_result_chars: int = 12000
+    astra_tool_auto_discover_apps: bool = True
+    astra_tool_blocked_apps: str = "[]"
 
     # ========================
     # Computed Properties

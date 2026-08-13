@@ -46,6 +46,12 @@ class ToolExecutor:
                 logger.warning("TOOL_VALIDATION_FAILED", extra={"tool_name": tool_call.name, "error": "Arguments must be a dictionary"})
                 raise ToolValidationError("Arguments must be a dictionary.")
                 
+            if "_parsing_error" in tool_call.arguments:
+                error_msg = tool_call.arguments["_parsing_error"]
+                raw_args = tool_call.arguments.get("_raw_arguments", "")
+                logger.warning("TOOL_VALIDATION_FAILED", extra={"tool_name": tool_call.name, "error": f"JSON parsing failed: {error_msg}"})
+                raise ToolValidationError(f"Your tool call arguments were malformed JSON: {error_msg}. Raw: {raw_args}")
+                
             try:
                 jsonschema.validate(instance=tool_call.arguments, schema=tool.schema)
             except ValidationError as ve:

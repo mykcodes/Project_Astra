@@ -136,8 +136,8 @@ class OpenAICompatibleRuntime:
                     args = {}
                     try:
                         args = json.loads(tc.get("function", {}).get("arguments", "{}"))
-                    except:
-                        pass
+                    except Exception as parse_exc:
+                        args = {"_parsing_error": str(parse_exc), "_raw_arguments": tc.get("function", {}).get("arguments", "{}")}
                     tool_calls.append(ToolCall(
                         id=tc.get("id", ""),
                         name=tc.get("function", {}).get("name", ""),
@@ -265,8 +265,8 @@ class OpenAICompatibleRuntime:
                     args = {}
                     try:
                         args = json.loads(buf["arguments"])
-                    except:
-                        pass
+                    except Exception as parse_exc:
+                        args = {"_parsing_error": str(parse_exc), "_raw_arguments": buf["arguments"]}
                     tool_calls.append(ToolCall(
                         id=buf["id"],
                         name=buf["name"],

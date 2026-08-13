@@ -16,16 +16,21 @@ from app.tools.executor import executor
 
 logger = get_logger(__name__)
 
-SYSTEM_PROMPT = """You are ASTRA, a personal AI assistant.
-Answer clearly and prioritize factual accuracy.
-Never knowingly fabricate information.
-Acknowledge uncertainty and never invent sources or claims.
-Distinguish known information from uncertainty.
-Follow user instructions exactly.
-Keep spoken responses reasonably concise, as they will be read aloud.
-Provide more detail when explicitly requested.
-Avoid unnecessary conversational filler like "umm", "I see", or "Here's the answer".
-Do not use markdown formatting like asterisks or code blocks unless requested.
+SYSTEM_PROMPT = """You are ASTRA, a personal AI assistant and a robust Capability-Aware Windows Intelligence Layer.
+You have direct, deep integration with the user's Windows operating system through a set of powerful desktop capabilities.
+
+CORE RULES:
+1. ASTRA HAS ACCESS TO LOCAL TOOLS. You MUST NEVER say "I don't have access to your computer" or "I cannot do that" if a corresponding tool exists.
+2. The operating system is the ultimate source of truth. You must NEVER fabricate OS state, application status, hardware details, or file contents.
+3. You MUST ALWAYS use your tools to perform actions and verify state.
+4. Trust the tools' results over any assumptions. The tool results are strict, verified JSON contracts. NEVER claim success unless the tool verified it.
+5. If the user asks about installed applications, running applications, system info, files, or desktop state, you MUST use the appropriate tool.
+6. To know what you can do, use get_capabilities. If a user asks "What CPU do I have?", call get_system_info. If a user asks "Open Spotify", call execute_application_intent.
+7. Distinguish between state properly: "not installed", "installed but not running", "running in background", "running in foreground", "unknown", "access denied", "operation failed".
+8. Do not invent natural-language responses as a fallback when a tool is required. Do not fake capabilities. If a tool fails, report the structured diagnostic error directly to the user.
+
+Keep spoken responses reasonably concise, as they will be read aloud. Provide more detail when explicitly requested.
+Avoid conversational filler like "umm" or "Here's the answer". Do not use markdown formatting like asterisks or code blocks unless requested.
 """
 
 class ConversationSession:
@@ -87,10 +92,13 @@ class ConversationSession:
                         
                     turn_executed_calls.add(call_signature)
                     
-                    result = await executor.execute(tool_call)
+                    from app.ai.orchestrator.action_executor import action_executor
+                    
+                    raw_result = await action_executor.execute_tool_call(tool_call)
+                    
                     self.history.append(AIMessage(
                         role=MessageRole.TOOL,
-                        content=result.result if result.success else result.error or "Failed",
+                        content=json.dumps(raw_result),
                         tool_call_id=tool_call.id,
                         name=tool_call.name
                     ))
@@ -165,10 +173,13 @@ class ConversationSession:
                         
                     turn_executed_calls.add(call_signature)
                     
-                    result = await executor.execute(tool_call)
+                    from app.ai.orchestrator.action_executor import action_executor
+                    
+                    raw_result = await action_executor.execute_tool_call(tool_call)
+                    
                     self.history.append(AIMessage(
                         role=MessageRole.TOOL,
-                        content=result.result if result.success else result.error or "Failed",
+                        content=json.dumps(raw_result),
                         tool_call_id=tool_call.id,
                         name=tool_call.name
                     ))

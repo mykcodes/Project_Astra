@@ -42,6 +42,7 @@ class ListDirectoryTool(Tool):
     name = "list_directory"
     description = "Lists files and directories inside a restricted allowed root path."
     risk = ToolRisk.SAFE
+    capabilities = ["FILESYSTEM_DISCOVERY"]
     schema = {
         "type": "object",
         "properties": {
@@ -83,6 +84,7 @@ class SearchFilesTool(Tool):
     name = "search_files"
     description = "Searches for filenames containing a specific query within the allowed root path."
     risk = ToolRisk.SAFE
+    capabilities = ["FILESYSTEM_SEARCH"]
     schema = {
         "type": "object",
         "properties": {
@@ -128,6 +130,7 @@ class CreateFolderTool(Tool):
     name = "create_folder"
     description = "Creates a new folder inside the restricted allowed root path."
     risk = ToolRisk.CONTROLLED
+    capabilities = ["FILE_CREATION"]
     schema = {
         "type": "object",
         "properties": {

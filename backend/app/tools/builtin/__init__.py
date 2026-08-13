@@ -1,8 +1,7 @@
 from app.tools.registry import registry
 from app.tools.builtin.time import GetTimeTool
-from app.tools.builtin.system import GetSystemInfoTool
-from app.tools.builtin.applications import OpenApplicationTool, OpenUrlTool
-from app.tools.builtin.processes import CloseApplicationTool
+from app.tools.builtin.system import GetSystemInfoTool, GetCapabilitiesTool
+from app.tools.builtin.applications import ExecuteApplicationIntentTool, OpenUrlTool
 from app.tools.builtin.filesystem import ListDirectoryTool, SearchFilesTool, CreateFolderTool
 
 def register_builtin_tools():
@@ -10,8 +9,8 @@ def register_builtin_tools():
     tools = [
         GetTimeTool(),
         GetSystemInfoTool(),
-        OpenApplicationTool(),
-        CloseApplicationTool(),
+        GetCapabilitiesTool(),
+        ExecuteApplicationIntentTool(),
         OpenUrlTool(),
         ListDirectoryTool(),
         SearchFilesTool(),

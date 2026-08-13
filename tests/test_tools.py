@@ -224,11 +224,15 @@ async def test_tool_result_in_history():
 async def test_max_tool_calls_enforced():
     provider = MagicMock()
     
-    # Always return a tool call
-    resp = AIResponse(content="", model="fake", provider="local", usage=None, finish_reason="tool_calls", tool_calls=[
-        ToolCall(id="1", name="dummy", arguments={})
-    ])
-    provider.generate = AsyncMock(return_value=resp)
+    call_idx = 0
+    def mock_generate(*args, **kwargs):
+        nonlocal call_idx
+        call_idx += 1
+        return AIResponse(content="", model="fake", provider="local", usage=None, finish_reason="tool_calls", tool_calls=[
+            ToolCall(id=str(call_idx), name="dummy", arguments={"idx": call_idx})
+        ])
+        
+    provider.generate = AsyncMock(side_effect=mock_generate)
     
     session = ConversationSession(provider=provider)
     with patch("app.tools.executor.executor.execute", new_callable=AsyncMock) as mock_exec:
@@ -315,8 +319,14 @@ async def test_tool_permission_rejection():
     from app.tools.builtin.applications import OpenApplicationTool
     tool = OpenApplicationTool()
     
-    with pytest.raises(ToolPermissionError):
-        await tool.execute(application="hacker_app")
+    with patch("app.tools.builtin.applications.get_settings") as mock_settings:
+        mock_settings.return_value.astra_tool_allowed_apps = '{}'
+        mock_settings.return_value.astra_tool_blocked_apps = '["hacker_app"]'
+        mock_settings.return_value.astra_tool_auto_discover_apps = True
+        
+        result = await tool.execute(application="hacker_app")
+        assert result["success"] == False
+        assert result["error_type"] == "APPLICATION_BLOCKED"
 
 # 14. OpenApplication allowlist
 @pytest.mark.asyncio
@@ -324,14 +334,52 @@ async def test_open_application_allowlist():
     from app.tools.builtin.applications import OpenApplicationTool
     tool = OpenApplicationTool()
     
-    # Mock settings and subprocess
     with patch("app.tools.builtin.applications.get_settings") as mock_settings:
         mock_settings.return_value.astra_tool_allowed_apps = '{"notepad": "notepad.exe"}'
+        mock_settings.return_value.astra_tool_blocked_apps = '[]'
+        mock_settings.return_value.astra_tool_auto_discover_apps = False
         with patch("subprocess.Popen") as mock_popen:
             result = await tool.execute(application="notepad")
             assert "success" in result
+            assert result["success"] == True
 
-# 15. Filesystem boundary
+@pytest.mark.asyncio
+async def test_open_application_blocked():
+    from app.tools.builtin.applications import OpenApplicationTool
+    tool = OpenApplicationTool()
+    
+    with patch("app.tools.builtin.applications.get_settings") as mock_settings:
+        mock_settings.return_value.astra_tool_allowed_apps = '{}'
+        mock_settings.return_value.astra_tool_blocked_apps = '["badapp"]'
+        mock_settings.return_value.astra_tool_auto_discover_apps = True
+        
+        result = await tool.execute(application="badapp")
+        assert result["success"] == False
+        assert result["error_type"] == "APPLICATION_BLOCKED"
+
+@pytest.mark.asyncio
+async def test_open_application_auto_discover():
+    from app.tools.builtin.applications import OpenApplicationTool
+    from app.tools.application_resolver import ApplicationResolution
+    tool = OpenApplicationTool()
+    
+    with patch("app.tools.builtin.applications.get_settings") as mock_settings:
+        mock_settings.return_value.astra_tool_allowed_apps = '{}'
+        mock_settings.return_value.astra_tool_blocked_apps = '[]'
+        mock_settings.return_value.astra_tool_auto_discover_apps = True
+        
+        with patch("app.tools.builtin.applications.resolver.resolve") as mock_resolve:
+            mock_resolve.return_value = ApplicationResolution(
+                found=True,
+                display_name="Test App",
+                launch_target="C:\\testapp.exe",
+                confidence=1.0
+            )
+            with patch("subprocess.Popen") as mock_popen:
+                result = await tool.execute(application="test app")
+                assert result["success"] == True
+                assert "Test App" in result["message"]
+
 @pytest.mark.asyncio
 async def test_filesystem_boundary():
     from app.tools.builtin.filesystem import ListDirectoryTool

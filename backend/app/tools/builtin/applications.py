@@ -1,100 +1,66 @@
 import asyncio
 import json
-import sys
-import subprocess
 import webbrowser
 from urllib.parse import urlparse
 from app.tools.base import Tool
 from app.tools.schemas import ToolRisk
 from app.tools.errors import ToolPermissionError, ToolExecutionError
 from app.core.config import get_settings
+from app.tools.desktop.desktop_controller import desktop_controller
+from app.tools.desktop.application_state import ApplicationIntent
 
-class OpenApplicationTool(Tool):
-    name = "open_application"
+class ExecuteApplicationIntentTool(Tool):
+    name = "execute_application_intent"
     description = (
-        "Opens a desktop application based on an explicitly allowed list. "
-        "Use this tool to actually launch an application when the user asks to open it. "
-        "Do NOT provide conversational instructions on how to open it."
+        "Executes a user's intent on a desktop application. "
+        "Supports OPEN (launch/focus), CLOSE (graceful exit), FOCUS (bring to front), "
+        "MINIMIZE, RESTORE, STATUS (check if running), and RESTART. "
+        "Use this tool to handle all desktop application interactions. "
+        "Do NOT provide conversational instructions on how to use the app, just execute the intent."
     )
     risk = ToolRisk.CONTROLLED
+    capabilities = ["APPLICATION_LAUNCH", "APPLICATION_CLOSE", "APPLICATION_FOCUS", "APPLICATION_STATUS"]
     schema = {
         "type": "object",
         "properties": {
+            "intent": {
+                "type": "string",
+                "enum": ["OPEN", "CLOSE", "FOCUS", "MINIMIZE", "RESTORE", "STATUS", "RESTART"],
+                "description": "The intent to execute on the application."
+            },
             "application": {
                 "type": "string",
-                "description": "The name of the application to open (e.g., 'vscode', 'notepad')."
+                "description": "The name of the application (e.g., 'spotify', 'vscode', 'notepad')."
             }
         },
-        "required": ["application"],
+        "required": ["intent", "application"],
         "additionalProperties": False
     }
 
-    async def execute(self, application: str, **kwargs) -> dict:
+    async def execute(self, intent: str, application: str, **kwargs) -> dict:
         if not isinstance(application, str):
             return {"success": False, "message": "Application name must be a string."}
             
         settings = get_settings()
-        allowed_apps_str = getattr(settings, "astra_tool_allowed_apps", "{}")
-        
+        blocked_apps_str = getattr(settings, "astra_tool_blocked_apps", "[]")
         try:
-            allowed_apps = json.loads(allowed_apps_str)
+            blocked_apps = json.loads(blocked_apps_str)
         except json.JSONDecodeError:
-            allowed_apps = {}
-            
-        app_key = application.lower()
-        executable = None
-        matched_app_name = None
-        
-        for key, val in allowed_apps.items():
-            if isinstance(val, dict):
-                aliases = [a.lower() for a in val.get("aliases", [])]
-                if app_key == key.lower() or app_key in aliases:
-                    executable = val.get("path")
-                    matched_app_name = key
-                    break
-            elif isinstance(val, str):
-                if app_key == key.lower():
-                    executable = val
-                    matched_app_name = key
-                    break
-                    
-        if not executable:
-            return {"success": False, "message": f"Application '{application}' is not configured in the ASTRA application allowlist."}
+            blocked_apps = []
             
         try:
-            if sys.platform == "win32":
-                DETACHED_PROCESS = 0x00000008
-                CREATE_NEW_PROCESS_GROUP = 0x00000200
-                process = subprocess.Popen(
-                    [executable],
-                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-                )
-            else:
-                process = subprocess.Popen(
-                    [executable],
-                    start_new_session=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+            intent_enum = ApplicationIntent(intent)
+        except ValueError:
+            return {"success": False, "message": f"Invalid intent: {intent}"}
             
-            return {"success": True, "message": f"Application '{matched_app_name}' launched successfully."}
-        except FileNotFoundError as e:
-            return {
-                "success": False,
-                "message": f"Failed to launch '{matched_app_name}'.",
-                "error": f"FileNotFoundError: Executable not found at {executable}"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Failed to launch '{matched_app_name}'.",
-                "error": f"{type(e).__name__}: {str(e)}"
-            }
+        result = await desktop_controller.execute_intent(intent_enum, application, blocked_apps=blocked_apps)
+        return result
 
 class OpenUrlTool(Tool):
     name = "open_url"
     description = "Opens an HTTP or HTTPS URL in the system's default web browser."
     risk = ToolRisk.CONTROLLED
+    capabilities = ["URL_OPEN"]
     schema = {
         "type": "object",
         "properties": {
