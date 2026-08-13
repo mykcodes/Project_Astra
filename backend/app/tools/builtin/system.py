@@ -1,6 +1,6 @@
 from app.tools.base import Tool
 from app.tools.schemas import ToolRisk
-from app.system.information_service import system_engine
+from app.environment.system.manager import system_engine
 
 class GetSystemInfoTool(Tool):
     name = "get_system_info"

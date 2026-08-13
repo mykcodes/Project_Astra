@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from app.ai.orchestrator.intent import NormalizedIntent, IntentDomain
 from app.ai.capabilities.registry import capability_registry, CapabilityDef
+from app.ai.context.engine import context_engine
 
 @dataclass
 class ActionPlanStep:
@@ -19,6 +20,10 @@ class ActionPlanner:
     """Maps intents to capabilities and tool execution plans."""
     
     def plan(self, intent: NormalizedIntent) -> ActionPlan:
+        # Resolve target context (e.g., "it" -> "spotify")
+        if intent.target:
+            intent.target = context_engine.resolve_reference(intent.target)
+            
         if intent.domain == IntentDomain.DESKTOP:
             return self._plan_desktop(intent)
         elif intent.domain == IntentDomain.SYSTEM:

@@ -81,7 +81,7 @@ class ActionExecutor:
                     continue
             
             if verified:
-                return {
+                result_payload = {
                     "success": True,
                     "action": intent.action,
                     "target": intent.target or "system",
@@ -89,12 +89,23 @@ class ActionExecutor:
                     "state_after": state_after,
                     "verified": True,
                     "attempts": attempts,
+                    "confidence": 0.98,
                     "error": None,
                     "diagnostics": result_data
                 }
+                from app.ai.context.engine import context_engine
+                context_engine.update_context(intent.action, intent.target, result_payload)
+                return result_payload
                 
         # If we exhausted attempts
-        return self._build_failure_result(last_error or "Max attempts reached without verification", attempts, last_diagnostics)
+        failure_payload = self._build_failure_result(last_error or "Max attempts reached without verification", attempts, last_diagnostics)
+        failure_payload["action"] = intent.action
+        failure_payload["target"] = intent.target or "system"
+        failure_payload["state_before"] = "UNKNOWN"
+        failure_payload["state_after"] = "UNKNOWN"
+        from app.ai.context.engine import context_engine
+        context_engine.update_context(intent.action, intent.target, failure_payload)
+        return failure_payload
 
     def _normalize_tool_call(self, tool_call: ToolCall) -> NormalizedIntent:
         name = tool_call.name
