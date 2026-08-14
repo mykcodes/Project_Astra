@@ -3,6 +3,7 @@ from app.tools.builtin.time import GetTimeTool
 from app.tools.builtin.system import GetSystemInfoTool, GetCapabilitiesTool
 from app.tools.builtin.applications import ExecuteApplicationIntentTool, OpenUrlTool
 from app.tools.builtin.filesystem import ListDirectoryTool, SearchFilesTool, CreateFolderTool
+from app.tools.desktop.interaction import ExecuteInteractionIntentTool
 
 def register_builtin_tools():
     """Registers all builtin tools with the global registry."""
@@ -15,6 +16,7 @@ def register_builtin_tools():
         ListDirectoryTool(),
         SearchFilesTool(),
         CreateFolderTool(),
+        ExecuteInteractionIntentTool(),
     ]
     
     for tool in tools:

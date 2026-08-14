@@ -59,6 +59,17 @@ class CapabilityRegistry:
         ))
         
         self.register(CapabilityDef(
+            name="interaction.execute_intent",
+            description="Executes semantic UI interactions like click, type, press, focus, and scroll on a resolved target.",
+            category=CapabilityCategory.INTERACTION,
+            required_tools=["execute_interaction_intent"],
+            input_requirements=["action", "application_name", "target_ui_element (optional)", "value (optional)"],
+            expected_result="Action applied to the UI element and state verified.",
+            verification_method="Verify expected OS or application state transition (e.g. value changed, window focused, or navigation occurred).",
+            failure_modes=["UI element not found", "UI Automation unsupported", "Element ambiguous", "Verification failed"]
+        ))
+        
+        self.register(CapabilityDef(
             name="filesystem.list",
             description="Lists contents of a directory.",
             category=CapabilityCategory.FILESYSTEM,

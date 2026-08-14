@@ -20,6 +20,7 @@ class Capability(str, Enum):
     FILE_CREATION = "FILE_CREATION"
     FILE_MODIFICATION = "FILE_MODIFICATION"
     SYSTEM_TIME = "SYSTEM_TIME"
+    INTERACTION = "INTERACTION"
 
 class ToolRegistry:
     def __init__(self):

@@ -7,6 +7,7 @@ class IntentDomain(str, Enum):
     SYSTEM = "system"
     BROWSER = "browser"
     FILESYSTEM = "filesystem"
+    INTERACTION = "interaction"
     UNKNOWN = "unknown"
 
 class NormalizedIntent(BaseModel):

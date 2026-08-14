@@ -32,8 +32,28 @@ class ActionPlanner:
             return self._plan_browser(intent)
         elif intent.domain == IntentDomain.FILESYSTEM:
             return self._plan_filesystem(intent)
+        elif intent.domain == IntentDomain.INTERACTION:
+            return self._plan_interaction(intent)
         else:
             raise ValueError(f"Unsupported intent domain: {intent.domain}")
+            
+    def _plan_interaction(self, intent: NormalizedIntent) -> ActionPlan:
+        cap = capability_registry.get("interaction.execute_intent")
+        args = {
+            "action": intent.action,
+            "application_name": intent.target,
+        }
+        if "target_ui_element" in intent.parameters:
+            args["target_ui_element"] = intent.parameters["target_ui_element"]
+        if "value" in intent.parameters:
+            args["value"] = intent.parameters["value"]
+            
+        step = ActionPlanStep(
+            tool_name="execute_interaction_intent",
+            arguments=args,
+            description=f"Executing {intent.action} interaction on {intent.target}"
+        )
+        return ActionPlan(intent=intent, capability=cap, steps=[step])
             
     def _plan_desktop(self, intent: NormalizedIntent) -> ActionPlan:
         capability = capability_registry.get("desktop.execute_intent")
