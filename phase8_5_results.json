@@ -1,0 +1,132 @@
+{
+  "timestamp": 1786680771.9964285,
+  "tests": [
+    {
+      "test_name": "AppControl_Notepad_Focus",
+      "action": "FOCUS",
+      "app_name": "Notepad",
+      "target": null,
+      "duration": 5.0303871631622314,
+      "result": {
+        "success": false,
+        "error_category": "FOCUS_DENIED",
+        "reason": "Target window did not become foreground",
+        "diagnostics": {
+          "strategy": "WIN32_FOCUS"
+        }
+      }
+    },
+    {
+      "test_name": "UI_Notepad_Type",
+      "action": "TYPE_TEXT",
+      "app_name": "Notepad",
+      "target": "Text Editor",
+      "duration": 4.166938304901123,
+      "result": {
+        "success": false,
+        "error_category": "VERIFICATION_FAILED",
+        "reason": "Control value change not observed.",
+        "diagnostics": {
+          "strategy": "KEYBOARD_INJECTION"
+        }
+      }
+    },
+    {
+      "test_name": "UI_Notepad_Menu",
+      "action": "CLICK",
+      "app_name": "Notepad",
+      "target": "File",
+      "duration": 3.7844676971435547,
+      "result": {
+        "success": false,
+        "error_category": "VERIFICATION_FAILED",
+        "reason": "No observable UI state transition occurred after click.",
+        "diagnostics": {
+          "strategy": "MOUSE_INJECTION"
+        }
+      }
+    },
+    {
+      "test_name": "Context_Pronoun",
+      "action": "CLICK",
+      "app_name": "it",
+      "target": "Edit",
+      "duration": 3.6697192192077637,
+      "result": {
+        "success": false,
+        "error_category": "VERIFICATION_FAILED",
+        "reason": "No observable UI state transition occurred after click.",
+        "diagnostics": {
+          "strategy": "MOUSE_INJECTION"
+        }
+      }
+    },
+    {
+      "test_name": "Tax_Missing_Target",
+      "action": "CLICK",
+      "app_name": "Notepad",
+      "target": "NonExistentControl123",
+      "duration": 1.1628553867340088,
+      "result": {
+        "success": false,
+        "error_category": "NOT_FOUND",
+        "reason": "Failed to resolve target: nonexistentcontrol123",
+        "diagnostics": {}
+      }
+    },
+    {
+      "test_name": "Tax_Ambiguous_Target",
+      "action": "CLICK",
+      "app_name": "Notepad",
+      "target": "Button",
+      "duration": 1.0828540325164795,
+      "result": {
+        "success": false,
+        "error_category": "TARGET_AMBIGUOUS",
+        "reason": "Failed to resolve target: button",
+        "diagnostics": {}
+      }
+    },
+    {
+      "test_name": "Tax_Missing_Window",
+      "action": "FOCUS",
+      "app_name": "NonExistentApp123",
+      "target": null,
+      "duration": 0.0,
+      "result": {
+        "success": false,
+        "error_category": "WINDOW_NOT_FOUND",
+        "reason": "Application nonexistentapp123 not found or ambiguous",
+        "diagnostics": {}
+      }
+    },
+    {
+      "test_name": "Sec_Inject",
+      "action": "TYPE_TEXT",
+      "app_name": "cmd.exe",
+      "target": null,
+      "duration": 0.0,
+      "result": {
+        "success": false,
+        "error_category": "WINDOW_NOT_FOUND",
+        "reason": "Application cmd.exe not found or ambiguous",
+        "diagnostics": {}
+      }
+    },
+    {
+      "test_name": "Sec_Traversal",
+      "action": "TYPE_TEXT",
+      "app_name": "notepad.exe",
+      "target": null,
+      "duration": 4.026674509048462,
+      "result": {
+        "success": false,
+        "error_category": "VERIFICATION_FAILED",
+        "reason": "Control value change not observed.",
+        "diagnostics": {
+          "strategy": "KEYBOARD_INJECTION"
+        }
+      }
+    }
+  ]
+}

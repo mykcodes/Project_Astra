@@ -7,6 +7,7 @@ class CapabilityCategory(str, Enum):
     SYSTEM = "system"
     BROWSER = "browser"
     FILESYSTEM = "filesystem"
+    INTERACTION = "interaction"
 
 @dataclass
 class CapabilityDef:

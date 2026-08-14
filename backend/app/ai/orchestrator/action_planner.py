@@ -20,11 +20,20 @@ class ActionPlanner:
     """Maps intents to capabilities and tool execution plans."""
     
     def plan(self, intent: NormalizedIntent) -> ActionPlan:
+        # Normalize Target
+        if not intent.target:
+            for key in ["application_name", "app_name", "target"]:
+                if key in intent.parameters:
+                    intent.target = intent.parameters.pop(key)
+                    break
+                    
         # Resolve target context (e.g., "it" -> "spotify")
         if intent.target:
             intent.target = context_engine.resolve_reference(intent.target)
             
-        if intent.domain == IntentDomain.DESKTOP:
+        if intent.domain.value == "COMPOUND" or intent.action == "COMPOUND":
+            return self._plan_compound(intent)
+        elif intent.domain == IntentDomain.DESKTOP:
             return self._plan_desktop(intent)
         elif intent.domain == IntentDomain.SYSTEM:
             return self._plan_system(intent)
@@ -34,8 +43,6 @@ class ActionPlanner:
             return self._plan_filesystem(intent)
         elif intent.domain == IntentDomain.INTERACTION:
             return self._plan_interaction(intent)
-        elif intent.domain.value == "COMPOUND" or intent.action == "COMPOUND":
-            return self._plan_compound(intent)
         else:
             raise ValueError(f"Unsupported intent domain: {intent.domain}")
             
@@ -44,13 +51,10 @@ class ActionPlanner:
         cap = capability_registry.get("interaction.execute_intent") # Assuming fallback capability
         
         for sub_intent_dict in intent.parameters.get("sequence", []):
-            try:
-                sub_intent = NormalizedIntent(**sub_intent_dict)
-                sub_plan = self.plan(sub_intent)
-                steps.extend(sub_plan.steps)
-                cap = sub_plan.capability # Use the last capability, or composite
-            except Exception as e:
-                pass
+            sub_intent = NormalizedIntent(**sub_intent_dict)
+            sub_plan = self.plan(sub_intent)
+            steps.extend(sub_plan.steps)
+            cap = sub_plan.capability # Use the last capability, or composite
                 
         return ActionPlan(intent=intent, capability=cap, steps=steps)
 
@@ -139,3 +143,5 @@ class ActionPlanner:
             description=f"Execute filesystem {action} on {intent.target}"
         )
         return ActionPlan(intent=intent, capability=capability, steps=[step])
+
+action_planner = ActionPlanner()

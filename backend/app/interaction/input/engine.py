@@ -17,6 +17,16 @@ except ImportError:
 class InputEngine:
     """Handles semantic interaction primitives using the fallback hierarchy."""
     
+    def get_capabilities(self) -> Dict[str, bool]:
+        """Deterministically report which interaction mechanisms are available."""
+        return {
+            "UIA_INVOKE": HAS_INPUT,
+            "UIA_VALUE": HAS_INPUT,
+            "KEYBOARD_INJECTION": HAS_INPUT,
+            "MOUSE_INJECTION": HAS_INPUT,
+            "WIN32_MESSAGES": HAS_INPUT, # Assumes win32gui/win32api available if HAS_INPUT
+        }
+    
     def click(self, element: UIElement) -> Dict[str, Any]:
         if not HAS_INPUT:
             return {"success": False, "reason": "Input dependencies missing", "method": None}
@@ -40,7 +50,7 @@ class InputEngine:
                 logger.warning(f"InvokePattern failed: {e}")
                 
         # 4. Mouse Injection / Coordinate Fallback (Requires verified bounding rect)
-        if element.bounding_rectangle and element.visible and element.enabled:
+        if element.bounding_rectangle and element.state.visible and element.state.enabled:
             x = element.bounding_rectangle.center_x
             y = element.bounding_rectangle.center_y
             try:
@@ -69,7 +79,7 @@ class InputEngine:
                 logger.warning(f"ValuePattern interaction failed: {e}")
                 
         # 3. Keyboard Injection (Requires focus)
-        if element.bounding_rectangle and element.visible:
+        if element.bounding_rectangle and element.state.visible:
             x = element.bounding_rectangle.center_x
             y = element.bounding_rectangle.center_y
             try:
@@ -127,5 +137,15 @@ class InputEngine:
             return {"success": True, "method": InteractionMethod.KEYBOARD_INJECTION.value}
         except Exception as e:
             return {"success": False, "reason": f"Key press failed: {e}"}
+
+    def type_text_fallback(self, text: str) -> Dict[str, Any]:
+        """Types text using sendkeys without coordinate focus."""
+        if not HAS_INPUT:
+            return {"success": False, "reason": "Input dependencies missing"}
+        try:
+            auto.SendKeys(text)
+            return {"success": True, "method": InteractionMethod.KEYBOARD_INJECTION.value}
+        except Exception as e:
+            return {"success": False, "reason": f"Type text fallback failed: {e}"}
 
 input_engine = InputEngine()

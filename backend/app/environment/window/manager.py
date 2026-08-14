@@ -123,8 +123,25 @@ class WindowManager:
         try:
             if self.is_minimized(hwnd):
                 self.user32.ShowWindow(hwnd, SW_RESTORE)
-            self.user32.SetForegroundWindow(hwnd)
-            return True
+                
+            foreground_hwnd = self.user32.GetForegroundWindow()
+            if foreground_hwnd == hwnd:
+                return True
+                
+            fg_thread = self.user32.GetWindowThreadProcessId(foreground_hwnd, None)
+            target_thread = self.user32.GetWindowThreadProcessId(hwnd, None)
+            
+            if fg_thread and target_thread and fg_thread != target_thread:
+                # Temporarily attach thread input to bypass foreground restrictions
+                self.user32.AttachThreadInput(target_thread, fg_thread, True)
+                self.user32.SetForegroundWindow(hwnd)
+                self.user32.AttachThreadInput(target_thread, fg_thread, False)
+            else:
+                self.user32.SetForegroundWindow(hwnd)
+                
+            # Verify Focus
+            return self.user32.GetForegroundWindow() == hwnd
+            
         except Exception as e:
             logger.warning(f"Failed to focus window: {e}")
             return False

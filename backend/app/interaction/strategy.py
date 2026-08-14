@@ -8,27 +8,34 @@ class StrategyEngine:
         strategies = adapter.get_interaction_strategy()
         applicable = []
         
+        caps = input_engine.get_capabilities()
+        
         if action == InteractionAction.CLICK:
             if "UIA_INVOKE" in strategies and element and "Invoke" in element.supported_patterns:
-                applicable.append("UIA_INVOKE")
+                if caps.get("UIA_INVOKE"):
+                    applicable.append("UIA_INVOKE")
             if "MOUSE_INJECTION" in strategies:
-                applicable.append("MOUSE_INJECTION")
+                if caps.get("MOUSE_INJECTION"):
+                    applicable.append("MOUSE_INJECTION")
                 
         elif action == InteractionAction.TYPE_TEXT:
             if "UIA_VALUE" in strategies and element and "Value" in element.supported_patterns:
-                applicable.append("UIA_VALUE")
-            applicable.append("KEYBOARD_INJECTION")
+                if caps.get("UIA_VALUE"):
+                    applicable.append("UIA_VALUE")
+            if caps.get("KEYBOARD_INJECTION"):
+                applicable.append("KEYBOARD_INJECTION")
             
         elif action == InteractionAction.FOCUS:
-            applicable.append("WIN32_FOCUS")
+            if caps.get("WIN32_FOCUS", True):
+                applicable.append("WIN32_FOCUS")
             
-        return applicable or ["MOUSE_INJECTION"] # Safe fallback
+        return applicable
 
     def execute_strategy(self, strategy: str, action: InteractionAction, obs: UIObservation, element: Optional[UIElement], value: Optional[str] = None) -> Dict[str, Any]:
         if strategy == "UIA_INVOKE":
             return input_engine.click(element)
         elif strategy == "MOUSE_INJECTION":
-            return {"success": False, "reason": "Mouse injection not implemented securely yet"}
+            return input_engine.click(element) # Coordinate fallback is in click()
         elif strategy == "UIA_VALUE":
             return input_engine.type_text(element, value)
         elif strategy == "KEYBOARD_INJECTION":
@@ -38,7 +45,7 @@ class StrategyEngine:
         elif strategy == "WIN32_FOCUS":
             from app.environment.window.manager import window_manager
             success = window_manager.restore_and_focus(obs.window.hwnd)
-            return {"success": success, "method": "WIN32_FOCUS"}
+            return {"success": success, "method": "WIN32_FOCUS", "reason": None if success else "Target window did not become foreground"}
             
         return {"success": False, "reason": f"Unknown strategy {strategy}"}
 

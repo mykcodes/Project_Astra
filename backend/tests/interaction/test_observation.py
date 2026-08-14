@@ -1,6 +1,6 @@
 import pytest
 from app.interaction.models import UIElement, UIElementState, UIObservation, UIChange
-from app.interaction.observation_engine import ObservationEngine
+from app.interaction.ui.engine import ObservationEngine
 
 def test_observation_diffing():
     engine = ObservationEngine()

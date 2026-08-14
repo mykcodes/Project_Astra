@@ -24,3 +24,4 @@ python-multipart>=0.0.9
 faster-whisper>=1.0.3
 psutil>=6.0.0
 uiautomation>=2.0.19
+pywin32>=306
