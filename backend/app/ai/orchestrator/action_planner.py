@@ -34,9 +34,26 @@ class ActionPlanner:
             return self._plan_filesystem(intent)
         elif intent.domain == IntentDomain.INTERACTION:
             return self._plan_interaction(intent)
+        elif intent.domain.value == "COMPOUND" or intent.action == "COMPOUND":
+            return self._plan_compound(intent)
         else:
             raise ValueError(f"Unsupported intent domain: {intent.domain}")
             
+    def _plan_compound(self, intent: NormalizedIntent) -> ActionPlan:
+        steps = []
+        cap = capability_registry.get("interaction.execute_intent") # Assuming fallback capability
+        
+        for sub_intent_dict in intent.parameters.get("sequence", []):
+            try:
+                sub_intent = NormalizedIntent(**sub_intent_dict)
+                sub_plan = self.plan(sub_intent)
+                steps.extend(sub_plan.steps)
+                cap = sub_plan.capability # Use the last capability, or composite
+            except Exception as e:
+                pass
+                
+        return ActionPlan(intent=intent, capability=cap, steps=steps)
+
     def _plan_interaction(self, intent: NormalizedIntent) -> ActionPlan:
         cap = capability_registry.get("interaction.execute_intent")
         args = {

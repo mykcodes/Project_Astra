@@ -2,11 +2,13 @@ from typing import Dict, Any, Optional
 import json
 from app.tools.base import Tool
 from app.tools.schemas import ToolRisk
-from app.interaction.models import InteractionAction
+from app.interaction.models import InteractionAction, InteractionErrorCategory
 from app.interaction.target_resolver import target_resolver
-from app.interaction.input.engine import input_engine
+from app.interaction.strategy import strategy_engine
 from app.interaction.verification import verification_engine
 from app.interaction.ui.engine import ui_engine
+from app.interaction.recovery import recovery_engine
+from app.interaction.capability_manager import capability_manager
 from app.ai.context.engine import context_engine
 from app.core.logging.logger import get_logger
 
@@ -14,32 +16,19 @@ logger = get_logger(__name__)
 
 class ExecuteInteractionIntentTool(Tool):
     name = "execute_interaction_intent"
-    description = "Executes semantic interactions (click, type, focus, etc) on UI elements within an application."
+    description = "Executes semantic interactions on UI elements utilizing an Observe -> Act -> Observe -> Verify loop."
     risk = ToolRisk.CONTROLLED
     capabilities = ["INTERACTION"]
     
-    # We define parameters manually here for simplicity, in a full pydantic model it would be strict
     @property
     def parameters_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
-                "action": {
-                    "type": "string",
-                    "description": "The action to perform (e.g. CLICK, TYPE_TEXT, PRESS_KEY, FOCUS)"
-                },
-                "target_ui_element": {
-                    "type": "string",
-                    "description": "The semantic name of the UI element (e.g. 'search button', 'address bar')"
-                },
-                "application_name": {
-                    "type": "string",
-                    "description": "The application to interact with."
-                },
-                "value": {
-                    "type": "string",
-                    "description": "The text to type or key to press, if applicable."
-                }
+                "action": {"type": "string"},
+                "target_ui_element": {"type": "string"},
+                "application_name": {"type": "string"},
+                "value": {"type": "string"}
             },
             "required": ["action", "application_name"]
         }
@@ -48,94 +37,88 @@ class ExecuteInteractionIntentTool(Tool):
         try:
             interaction_action = InteractionAction(action.upper())
         except ValueError:
-            return {"success": False, "reason": f"Invalid interaction action: {action}"}
+            return {"success": False, "error_category": "INTERACTION_UNSUPPORTED", "reason": f"Invalid action: {action}"}
             
         app_name = context_engine.resolve_reference(application_name) or application_name
+        target_query = context_engine.resolve_reference(target_ui_element) if target_ui_element else None
         
-        # Genuine 2-attempt loop for target resolution + interaction
         attempt = 1
-        max_attempts = 2
-        last_result = None
+        max_attempts = recovery_engine.max_attempts + 1
+        diagnostics = {"recovery_attempts": [], "latencies": {}}
         
         while attempt <= max_attempts:
             # 1. Resolve Window
-            window_res = target_resolver.resolve_window_target(app_name)
-            if window_res["status"] != "RESOLVED":
-                return {"success": False, "reason": window_res["reason"]}
+            window_res = target_resolver.resolve_window_target(app_name) # Assuming this was updated or is compatible
+            if window_res.get("status") != "RESOLVED":
+                return self._fail("WINDOW_NOT_FOUND", window_res.get("reason"), diagnostics)
                 
-            window_target = window_res["window"]
-            hwnd = window_target.hwnd
+            hwnd = window_res["window"].hwnd
             
-            # Capture Pre-State
-            pre_state = verification_engine.get_pre_action_state(hwnd)
-            
-            # 2. Check UI Capability
-            if window_target.automation_support == "UI_AUTOMATION_UNAVAILABLE":
-                return {"success": False, "reason": "UI_AUTOMATION_UNAVAILABLE: Application does not expose accessibility information."}
+            # 2. Pre-Action Observation
+            pre_obs = ui_engine.observe_window(hwnd, force=(attempt > 1))
+            if pre_obs.window.is_modal and not (target_query and "modal" in target_query.lower()):
+                return self._fail("MODAL_BLOCKED", "An unexpected modal is blocking interaction", diagnostics)
                 
-            # 3. Resolve Element if needed
+            # 3. Target Resolution
             ui_element = None
-            if target_ui_element:
-                target_query = context_engine.resolve_reference(target_ui_element) or target_ui_element
-                element_res = target_resolver.resolve_ui_target(hwnd, target_query, force_refresh=(attempt > 1))
-                
-                if element_res["status"] != "RESOLVED":
-                    if attempt < max_attempts:
-                        ui_engine.invalidate_cache(hwnd)
+            if target_query:
+                res_result = target_resolver.resolve_ui_target(hwnd, target_query, force_refresh=False)
+                if res_result.status != "RESOLVED":
+                    strategies = recovery_engine.attempt_recovery(attempt, res_result.status, hwnd, app_name)
+                    if strategies:
+                        diagnostics["recovery_attempts"].append(strategies)
                         attempt += 1
                         continue
-                    return {"success": False, "reason": element_res["reason"], "status": element_res["status"], "diagnostics": element_res.get("diagnostics", {})}
+                    return self._fail(res_result.status, f"Failed to resolve target: {target_query}", diagnostics)
+                ui_element = res_result.selected_candidate
+                
+            # 4. Strategy Selection
+            caps = capability_manager.inspect_window(hwnd)
+            adapter = capability_manager.adapters[-1] # Simplification, need actual routing
+            for a in capability_manager.adapters:
+                if a.can_handle(pre_obs.window):
+                    adapter = a
+                    break
                     
-                ui_element = element_res["element"]
+            applicable_strategies = strategy_engine.select_interaction_strategy(interaction_action, adapter, pre_obs, ui_element)
+            
+            # 5. Execute
+            exec_result = None
+            used_strategy = None
+            for strategy in applicable_strategies:
+                exec_result = strategy_engine.execute_strategy(strategy, interaction_action, pre_obs, ui_element, value)
+                if exec_result.get("success"):
+                    used_strategy = strategy
+                    break
+                    
+            if not exec_result or not exec_result.get("success"):
+                return self._fail("INPUT_FAILED", "All applicable interaction strategies failed.", diagnostics)
                 
-            # 4. Execute Action
-            result_payload = {"success": False, "reason": "Action not implemented"}
-            if interaction_action == InteractionAction.CLICK:
-                if not ui_element:
-                    return {"success": False, "reason": "Target UI element required for CLICK"}
-                result_payload = input_engine.click(ui_element)
-                
-            elif interaction_action == InteractionAction.TYPE_TEXT:
-                if not ui_element:
-                    return {"success": False, "reason": "Target UI element required for TYPE_TEXT"}
-                if not value:
-                    return {"success": False, "reason": "Value required for TYPE_TEXT"}
-                result_payload = input_engine.type_text(ui_element, value)
-                
-            elif interaction_action == InteractionAction.PRESS_KEY:
-                if not value:
-                    return {"success": False, "reason": "Value (key) required for PRESS_KEY"}
-                result_payload = input_engine.press_key(value)
-                
-            elif interaction_action == InteractionAction.FOCUS:
-                from app.environment.window.manager import window_manager
-                success = window_manager.restore_and_focus(hwnd)
-                result_payload = {"success": success, "method": "WIN32"}
-                
-            # 5. Verify
+            # 6. Post-Action Observation & Verification
+            exec_result["method"] = used_strategy
             final_result = verification_engine.verify_action(
                 action=interaction_action,
-                target_name=target_ui_element or app_name,
+                target_name=target_query or app_name,
                 app_name=app_name,
-                hwnd=hwnd,
                 element=ui_element,
-                result_payload=result_payload,
-                pre_state=pre_state
+                result_payload=exec_result,
+                pre_state_obs=pre_obs
             )
             final_result.attempts = attempt
+            final_result.diagnostics.update(diagnostics)
             
-            # Recovery logic: if we verified it failed and we haven't maxed out attempts
-            if not final_result.success and attempt < max_attempts:
-                ui_engine.invalidate_cache(hwnd)
-                context_engine.invalidate_ui_context()
-                attempt += 1
-                continue
-                
-            # 6. Update Context
-            context_engine.update_interaction_context(target_ui_element or app_name, interaction_action.value, final_result.success)
-            
+            if not final_result.success:
+                strategies = recovery_engine.attempt_recovery(attempt, "VERIFICATION_FAILED", hwnd, app_name)
+                if strategies:
+                    diagnostics["recovery_attempts"].append(strategies)
+                    attempt += 1
+                    continue
+                    
+            # 7. Update Context
+            context_engine.update_interaction_context(target_query or app_name, interaction_action.value, final_result.success, pre_obs)
             return final_result.to_dict()
             
-        return {"success": False, "reason": "Max attempts exceeded."}
+        return self._fail("RECOVERY_EXHAUSTED", "Max recovery attempts exceeded", diagnostics)
 
-# We need to register this tool in the registry later
+    def _fail(self, category: str, reason: str, diagnostics: dict) -> dict:
+        return {"success": False, "error_category": category, "reason": reason, "diagnostics": diagnostics}

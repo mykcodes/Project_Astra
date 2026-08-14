@@ -1,6 +1,8 @@
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
+import time
+import uuid
 
 class UIAutomationSupport(str, Enum):
     FULL = "UI_AUTOMATION_FULL"
@@ -48,6 +50,12 @@ class InteractionErrorCategory(str, Enum):
     PERMISSION_DENIED = "PERMISSION_DENIED"
     TIMEOUT = "TIMEOUT"
     UNSUPPORTED_APPLICATION = "UNSUPPORTED_APPLICATION"
+    MODAL_BLOCKED = "MODAL_BLOCKED"
+    STALE_OBSERVATION = "STALE_OBSERVATION"
+    APPLICATION_NOT_READY = "APPLICATION_NOT_READY"
+    TEXT_VERIFICATION_FAILED = "TEXT_VERIFICATION_FAILED"
+    INTERACTION_UNSUPPORTED = "INTERACTION_UNSUPPORTED"
+    RECOVERY_EXHAUSTED = "RECOVERY_EXHAUSTED"
 
 @dataclass
 class BoundingRectangle:
@@ -73,6 +81,16 @@ class BoundingRectangle:
         return self.top + (self.height // 2)
 
 @dataclass
+class UIElementState:
+    """Represents the instantaneous state of a UIElement"""
+    enabled: bool = True
+    visible: bool = True
+    focused: bool = False
+    selected: bool = False
+    value_available: bool = False
+    value: Optional[str] = None # Masked if sensitive
+
+@dataclass
 class UIElement:
     """Represents a discovered UI element with robust identity for re-resolution."""
     runtime_id: str
@@ -83,18 +101,83 @@ class UIElement:
     framework_id: str
     process_id: int
     window_handle: int
+    role: str = ""
     parent_id: Optional[str] = None
-    enabled: bool = True
-    visible: bool = True
-    focused: bool = False
-    selected: bool = False
+    children_ids: List[str] = field(default_factory=list)
+    state: UIElementState = field(default_factory=UIElementState)
     bounding_rectangle: Optional[BoundingRectangle] = None
     supported_patterns: List[str] = field(default_factory=list)
     confidence: float = 1.0
 
 @dataclass
+class UIWindow:
+    """Represents a window structure for Observation"""
+    hwnd: int
+    process_id: int
+    application_identity: str
+    framework: str
+    title: str
+    role: str
+    bounds: Optional[BoundingRectangle]
+    monitor: int
+    z_order: int
+    is_main_window: bool
+    is_modal: bool
+    is_popup: bool
+    is_minimized: bool
+    is_maximized: bool
+    is_foreground: bool
+    owner_hwnd: Optional[int] = None
+    parent_hwnd: Optional[int] = None
+
+@dataclass
+class UIObservation:
+    """A canonical snapshot of UI state at a given time."""
+    observation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: float = field(default_factory=time.time)
+    window: UIWindow = None
+    elements: Dict[str, UIElement] = field(default_factory=dict)
+    foreground_hwnd: int = 0
+    state_hash: str = ""
+    valid: bool = True
+
+@dataclass
+class UIChange:
+    """Represents a structural or state transition between two observations."""
+    change_type: str  # e.g., 'FOCUS_CHANGED', 'VALUE_CHANGED', 'WINDOW_OPENED', 'CONTROL_APPEARED'
+    element_id: Optional[str] = None
+    old_value: Any = None
+    new_value: Any = None
+    description: str = ""
+
+@dataclass
+class UIQueryResult:
+    """Represents the result of semantic target resolution."""
+    query: str
+    status: str # RESOLVED, AMBIGUOUS, NOT_FOUND
+    candidate_count: int
+    selected_candidate: Optional[UIElement] = None
+    confidence: float = 0.0
+    matching_properties: List[str] = field(default_factory=list)
+    ambiguous_candidates: List[str] = field(default_factory=list)
+    observation_id: str = ""
+
+@dataclass
+class UIInteractionContext:
+    """Short-lived interaction queue memory."""
+    foreground_application: str = ""
+    foreground_window: int = 0
+    active_modal: Optional[int] = None
+    current_ui_target: Optional[str] = None
+    previous_ui_target: Optional[str] = None
+    last_successful_interaction: Optional[str] = None
+    last_failed_target: Optional[str] = None
+    last_observed_state: Optional[UIObservation] = None
+    interaction_sequence: List[str] = field(default_factory=list)
+
+@dataclass
 class WindowTarget:
-    """Represents a verified target window."""
+    """Legacy target window. Retained for compatibility where needed."""
     hwnd: int
     process_id: int
     title: str

@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional, List
 from app.environment.snapshot import snapshot
-from app.environment.models import WindowEntity
+from app.interaction.models import UIInteractionContext, UIObservation
 
 class ContextEngine:
     def __init__(self):
@@ -11,11 +11,7 @@ class ContextEngine:
         self.last_action_result: Optional[Dict[str, Any]] = None
         self.last_referenced_entity: Optional[str] = None
         
-        # Phase 7 extensions
-        self.current_ui_target: Optional[str] = None
-        self.last_verified_interaction: Optional[str] = None
-        self.last_failed_interaction: Optional[str] = None
-        self.ui_tree_invalidation_timestamp: float = 0.0
+        self.ui_context = UIInteractionContext()
         
     def get_foreground_application(self) -> Optional[str]:
         fw = snapshot.get_foreground_window()
@@ -25,33 +21,42 @@ class ContextEngine:
         
     def resolve_reference(self, reference: str) -> Optional[str]:
         reference = reference.lower().strip()
-        if reference in ("it", "this", "that"):
-            # If we recently targeted a UI element and the user says "click it" or "type this", use that.
-            # Otherwise fall back to application level
-            if self.current_ui_target:
-                return self.current_ui_target
+        if reference in ("it", "this", "that", "the target"):
+            if self.ui_context.current_ui_target:
+                return self.ui_context.current_ui_target
             return self.current_application or self.last_referenced_entity or self.get_foreground_application()
         return reference
         
-    def update_interaction_context(self, target: str, action: str, success: bool):
+    def update_interaction_context(self, target: str, action: str, success: bool, observation: Optional[UIObservation] = None):
         """Updates interaction-specific short-lived context"""
-        self.current_ui_target = target
+        self.ui_context.previous_ui_target = self.ui_context.current_ui_target
+        self.ui_context.current_ui_target = target
+        self.ui_context.interaction_sequence.append(f"{action} on {target}")
+        
         if success:
-            self.last_verified_interaction = action
+            self.ui_context.last_successful_interaction = action
         else:
-            self.last_failed_interaction = action
+            self.ui_context.last_failed_target = target
+            
+        if observation:
+            self.ui_context.last_observed_state = observation
+            self.ui_context.foreground_window = observation.foreground_hwnd
+            if observation.window:
+                self.ui_context.foreground_application = observation.window.application_identity
+                if observation.window.is_modal:
+                    self.ui_context.active_modal = observation.window.hwnd
+                else:
+                    self.ui_context.active_modal = None
             
     def invalidate_ui_context(self):
-        """Called when a major navigation or window recreation occurs."""
-        self.current_ui_target = None
-        self.ui_tree_invalidation_timestamp = __import__("time").time()
+        self.ui_context = UIInteractionContext()
         
     def update_context(self, intent: str, target: Optional[str], result: Optional[Dict[str, Any]] = None):
         self.current_intent = intent
         
         if target and target.lower() not in ("it", "this", "that", "system"):
             if self.current_application != target:
-                self.invalidate_ui_context() # App changed, UI is stale
+                self.invalidate_ui_context()
                 
             self.current_application = target
             self.last_referenced_entity = target

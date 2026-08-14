@@ -65,6 +65,9 @@ class WindowManager:
                     width = rect.right - rect.left
                     height = rect.bottom - rect.top
                     
+                    # Owner/Parent
+                    owner = self.user32.GetWindow(hwnd, GW_OWNER)
+                    
                     # Determine Monitor (simplified via default)
                     MONITOR_DEFAULTTONEAREST = 2
                     hmonitor = ctypes.windll.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
