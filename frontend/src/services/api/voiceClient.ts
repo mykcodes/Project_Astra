@@ -50,7 +50,7 @@ export class VoiceClient {
   /**
    * Send a message to the AI conversation orchestrator (streaming).
    */
-  async streamMessage(text: string, onChunk: (chunk: string) => void): Promise<void> {
+  async streamMessage(text: string, onEvent: (event: any) => void): Promise<void> {
     const response = await fetch(`${API_BASE}/conversation/message/stream`, {
       method: 'POST',
       headers: {
@@ -69,12 +69,34 @@ export class VoiceClient {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (value) {
-        onChunk(decoder.decode(value, { stream: true }));
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const event = JSON.parse(line);
+              onEvent(event);
+            } catch (e) {
+              console.error('Failed to parse SSE JSON:', line, e);
+            }
+          }
+        }
+      }
+    }
+    
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer);
+        onEvent(event);
+      } catch (e) {
+        console.error('Failed to parse SSE JSON (end):', buffer, e);
       }
     }
   }

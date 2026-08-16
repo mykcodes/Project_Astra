@@ -34,7 +34,7 @@ async def stream_message(request: MessageRequest):
     try:
         # Wrap the generator to match standard SSE format (optional but standard)
         # or just stream the raw text chunks. We will stream raw text chunks.
-        return StreamingResponse(session.chat_stream(request.text), media_type="text/plain")
+        return StreamingResponse(session.chat_stream(request.text), media_type="application/x-ndjson")
     except Exception as e:
         logger.error(f"Conversation stream failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to stream AI response")

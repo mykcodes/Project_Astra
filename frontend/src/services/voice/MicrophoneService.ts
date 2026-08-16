@@ -55,7 +55,7 @@ export class MicrophoneService {
       
       let sum = 0;
       for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
+        sum += dataArray[i]!;
       }
       const average = sum / bufferLength;
       

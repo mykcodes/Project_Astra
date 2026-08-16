@@ -22,7 +22,7 @@ class ExecuteInteractionIntentTool(Tool):
     capabilities = ["INTERACTION"]
     
     @property
-    def parameters_schema(self) -> dict:
+    def schema(self) -> dict:
         return {
             "type": "object",
             "properties": {

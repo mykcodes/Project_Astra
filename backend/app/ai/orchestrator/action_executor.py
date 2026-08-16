@@ -77,7 +77,9 @@ class ActionExecutor:
             else:
                 verified = result_data.get("success", True)
                 if not verified:
-                    last_error = result_data.get("error", "Operation failed")
+                    last_error = result_data.get("error") or result_data.get("message") or "Operation failed"
+                    if isinstance(last_error, dict) and last_error.get("code") == "HUMAN_VERIFICATION_REQUIRED":
+                        break
                     continue
             
             if verified:
@@ -97,8 +99,15 @@ class ActionExecutor:
                 context_engine.update_context(intent.action, intent.target, result_payload)
                 return result_payload
                 
-        # If we exhausted attempts
-        failure_payload = self._build_failure_result(last_error or "Max attempts reached without verification", attempts, last_diagnostics)
+        # If we exhausted attempts or encountered a critical human verification block
+        failure_code = "EXECUTION_FAILED"
+        if isinstance(last_error, dict) and last_error.get("code") == "HUMAN_VERIFICATION_REQUIRED":
+            failure_code = "HUMAN_VERIFICATION_REQUIRED"
+            error_details = last_error.get("message", "Human verification required")
+        else:
+            error_details = last_error or "Max attempts reached without verification"
+            
+        failure_payload = self._build_failure_result(error_details, attempts, last_diagnostics, failure_code)
         failure_payload["action"] = intent.action
         failure_payload["target"] = intent.target or "system"
         failure_payload["state_before"] = "UNKNOWN"
@@ -123,6 +132,10 @@ class ActionExecutor:
             return NormalizedIntent.filesystem(action="search", target=args.get("path"), query=args.get("query"))
         elif name == "create_folder":
             return NormalizedIntent.filesystem(action="create_folder", target=args.get("path"))
+        elif name == "execute_browser_intent":
+            return NormalizedIntent.browser(action=args.get("intent"), target=args.get("target"))
+        elif name == "interact_browser":
+            return NormalizedIntent.browser(action=args.get("action"), target=args.get("target"), value=args.get("value"))
         
         raise ValueError(f"Cannot normalize unknown tool: {name}")
 
@@ -134,12 +147,12 @@ class ActionExecutor:
                 return {"success": True, "result": tool_result.result}
         return {"success": False, "error": tool_result.error}
 
-    def _build_failure_result(self, error_msg: str, attempts: int = 0, diagnostics: Dict = None) -> Dict[str, Any]:
+    def _build_failure_result(self, error_msg: str, attempts: int = 0, diagnostics: Dict = None, failure_code: str = "EXECUTION_FAILED") -> Dict[str, Any]:
         return {
             "success": False,
             "verified": False,
             "error": {
-                "code": "EXECUTION_FAILED",
+                "code": failure_code,
                 "message": error_msg
             },
             "attempts": attempts,

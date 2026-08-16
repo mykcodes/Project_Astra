@@ -185,4 +185,11 @@ class SystemInformationEngine:
             network=self.get_network_info()
         )
 
+    def get_selected_fields(self, sections: Optional[List[str]] = None) -> dict:
+        entity = self.get_system_entity()
+        data = dataclasses.asdict(entity)
+        if not sections:
+            return data
+        return {k: v for k, v in data.items() if k in sections}
+
 system_engine = SystemInformationEngine()

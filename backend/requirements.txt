@@ -25,3 +25,5 @@ faster-whisper>=1.0.3
 psutil>=6.0.0
 uiautomation>=2.0.19
 pywin32>=306
+playwright>=1.40.0
+playwright-stealth==2.0.3

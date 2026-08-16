@@ -204,7 +204,90 @@ class GroqProvider(AIProvider):
     async def generate_stream(
         self, request: AIRequest
     ) -> AsyncIterator[AIResponseChunk]:
-        raise NotImplementedError("GroqProvider.generate_stream is not yet implemented")
+        if not self.client:
+            raise ProviderConfigurationError(
+                "Groq API key is not configured.",
+                provider="groq",
+            )
+
+        messages = []
+        for msg in request.messages:
+            if msg.role == "tool":
+                messages.append({
+                    "role": "tool",
+                    "content": msg.content,
+                    "tool_call_id": msg.tool_call_id
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                groq_tool_calls = []
+                for call in msg.tool_calls:
+                    import json
+                    groq_tool_calls.append({
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(call.arguments)
+                        }
+                    })
+                msg_dict = {
+                    "role": "assistant",
+                    "tool_calls": groq_tool_calls
+                }
+                if msg.content:
+                    msg_dict["content"] = msg.content
+                messages.append(msg_dict)
+            else:
+                messages.append({
+                    "role": msg.role.value,
+                    "content": msg.content
+                })
+
+        groq_tools = None
+        if request.tools:
+            groq_tools = []
+            for tool in request.tools:
+                groq_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                })
+
+        model_name = self.default_model
+        
+        logger.info(f"AI_STREAM_REQUEST_STARTED: provider=groq model={model_name}")
+        start = time.perf_counter()
+
+        kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": request.temperature or 0.7,
+            "max_tokens": request.max_tokens,
+            "stop": request.stop_sequences,
+            "stream": True,
+        }
+        if groq_tools:
+            kwargs["tools"] = groq_tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            stream = await self.client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    content = delta.content or ""
+                    yield AIResponseChunk(content=content)
+        except Exception as exc:
+            latency_ms = (time.perf_counter() - start) * 1000
+            self._handle_api_error(exc, latency_ms)
+
+        logger.info(
+            "AI_STREAM_RESPONSE_FINISHED",
+            extra={"provider": "groq", "model": model_name},
+        )
 
     async def count_tokens(self, text: str) -> int:
         raise NotImplementedError("GroqProvider.count_tokens is not yet implemented")

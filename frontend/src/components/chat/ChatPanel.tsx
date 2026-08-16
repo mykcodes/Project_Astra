@@ -3,10 +3,18 @@ import { useUIStore } from '@/state/uiStore.ts';
 import { voiceClient } from '@/services/api/voiceClient.ts';
 import './ChatPanel.css';
 
+interface TaskItem {
+  id: string;
+  label: string;
+  state: 'pending' | 'active' | 'completed' | 'failed' | 'recovery' | 'waiting';
+}
+
 interface Message {
   id: string;
   role: 'user' | 'astra';
   content: string;
+  tasks: TaskItem[];
+  goalState?: 'running' | 'completed' | 'failed';
 }
 
 export function ChatPanel() {
@@ -25,39 +33,72 @@ export function ChatPanel() {
   const handleSend = async () => {
     if (!inputText.trim() || isTyping) return;
     
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: inputText.trim() };
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: inputText.trim(), tasks: [] };
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsTyping(true);
 
     try {
       const responseId = Date.now().toString() + '-resp';
-      let isFirstChunk = true;
+      let messageCreated = false;
 
-      await voiceClient.streamMessage(userMsg.content, (chunk) => {
-        if (isFirstChunk) {
-          isFirstChunk = false;
-          setIsTyping(false);
-          setMessages(prev => [...prev, { id: responseId, role: 'astra', content: chunk }]);
-        } else {
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === responseId 
-                ? { ...msg, content: msg.content + chunk } 
-                : msg
-            )
-          );
-        }
-      });
-
-      // Just in case the stream ended completely empty
-      if (isFirstChunk) {
+      await voiceClient.streamMessage(userMsg.content, (event: any) => {
         setIsTyping(false);
-      }
+        
+        if (!messageCreated) {
+          setMessages(prev => [...prev, { id: responseId, role: 'astra', content: '', tasks: [], goalState: 'running' }]);
+          messageCreated = true;
+        }
+
+        setMessages(prev => 
+          prev.map(msg => {
+            if (msg.id !== responseId) return msg;
+            
+            const updatedMsg = { ...msg, tasks: [...msg.tasks] };
+            
+            if (event.event_type === 'ASSISTANT_RESPONSE') {
+              updatedMsg.content += (event.payload?.text || '');
+            } else if (event.event_type === 'GOAL_COMPLETED') {
+              updatedMsg.goalState = 'completed';
+            } else if (event.event_type === 'GOAL_FAILED') {
+              updatedMsg.goalState = 'failed';
+            } else if (event.task_id) {
+              const taskIndex = updatedMsg.tasks.findIndex(t => t.id === event.task_id);
+              
+              let state: TaskItem['state'] = 'pending';
+              if (['TASK_STARTED', 'TASK_PROGRESS', 'VERIFICATION_STARTED'].includes(event.event_type)) state = 'active';
+              if (['TASK_COMPLETED', 'VERIFICATION_COMPLETED'].includes(event.event_type)) state = 'completed';
+              if (event.event_type === 'TASK_FAILED') state = 'failed';
+              if (event.event_type === 'RECOVERY_STARTED') state = 'recovery';
+              if (event.event_type === 'WAITING_FOR_USER') state = 'waiting';
+
+              const existingTask = taskIndex >= 0 ? updatedMsg.tasks[taskIndex] : undefined;
+
+              if (existingTask) {
+                updatedMsg.tasks[taskIndex] = {
+                  ...existingTask,
+                  label: event.progress_label,
+                  state: state !== 'pending' ? state : existingTask.state
+                };
+              } else {
+                updatedMsg.tasks.push({
+                  id: event.task_id,
+                  label: event.progress_label,
+                  state
+                });
+              }
+            }
+            
+            return updatedMsg;
+          })
+        );
+      });
+      setIsTyping(false);
+
     } catch (error) {
       console.error('Chat error:', error);
       setIsTyping(false);
-      const errorMsg: Message = { id: Date.now().toString() + '-err', role: 'astra', content: "Sorry, I encountered an error." };
+      const errorMsg: Message = { id: Date.now().toString() + '-err', role: 'astra', content: "Sorry, I encountered an error.", tasks: [] };
       setMessages(prev => [...prev, errorMsg]);
     }
   };
@@ -65,6 +106,17 @@ export function ChatPanel() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleSend();
+    }
+  };
+
+  const renderTaskIcon = (state: string) => {
+    switch (state) {
+      case 'completed': return '✓';
+      case 'active': return '●';
+      case 'failed': return '✗';
+      case 'recovery': return '⚠';
+      case 'waiting': return '✋';
+      default: return '○';
     }
   };
 
@@ -92,7 +144,19 @@ export function ChatPanel() {
           ) : (
             messages.map(msg => (
               <div key={msg.id} className={`chat-message ${msg.role}`}>
-                {msg.content}
+                {msg.tasks && msg.tasks.length > 0 && (
+                  <div className="task-list">
+                    {msg.tasks.map(task => (
+                      <div key={task.id} className={`task-item ${task.state}`}>
+                        <span className="task-icon">{renderTaskIcon(task.state)}</span>
+                        <span className="task-label">{task.label}</span>
+                      </div>
+                    ))}
+                    {msg.goalState === 'completed' && <div className="task-item completed"><span className="task-icon">✓</span><span className="task-label">Goal completed</span></div>}
+                    {msg.goalState === 'failed' && <div className="task-item failed"><span className="task-icon">✗</span><span className="task-label">Goal failed</span></div>}
+                  </div>
+                )}
+                {msg.content && <div className="message-content">{msg.content}</div>}
               </div>
             ))
           )}

@@ -4,6 +4,7 @@ import time
 from typing import Any
 import jsonschema
 from jsonschema.exceptions import ValidationError
+from fastapi.encoders import jsonable_encoder
 
 from app.tools.registry import registry
 from app.tools.errors import ToolError, ToolNotFoundError, ToolValidationError, ToolExecutionError, ToolPermissionError, ToolTimeoutError
@@ -80,7 +81,7 @@ class ToolExecutor:
             
             # Serialize result to string for the LLM
             if isinstance(result_data, dict) or isinstance(result_data, list):
-                result_str = json.dumps(result_data)
+                result_str = json.dumps(jsonable_encoder(result_data))
             else:
                 result_str = str(result_data)
                 

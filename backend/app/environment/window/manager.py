@@ -123,27 +123,70 @@ class WindowManager:
         try:
             if self.is_minimized(hwnd):
                 self.user32.ShowWindow(hwnd, SW_RESTORE)
-                
-            foreground_hwnd = self.user32.GetForegroundWindow()
-            if foreground_hwnd == hwnd:
-                return True
-                
-            fg_thread = self.user32.GetWindowThreadProcessId(foreground_hwnd, None)
-            target_thread = self.user32.GetWindowThreadProcessId(hwnd, None)
-            
-            if fg_thread and target_thread and fg_thread != target_thread:
-                # Temporarily attach thread input to bypass foreground restrictions
-                self.user32.AttachThreadInput(target_thread, fg_thread, True)
-                self.user32.SetForegroundWindow(hwnd)
-                self.user32.AttachThreadInput(target_thread, fg_thread, False)
             else:
-                self.user32.SetForegroundWindow(hwnd)
+                self.user32.ShowWindow(hwnd, 5) # SW_SHOW
+                
+            # Trick to force foreground: Simulate Alt key press/release
+            # This temporarily disables Windows' foreground lock mechanism
+            VK_MENU = 0x12
+            KEYEVENTF_EXTENDEDKEY = 0x0001
+            KEYEVENTF_KEYUP = 0x0002
+            
+            # Press ALT
+            self.user32.keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY, 0)
+            
+            # Bring window to the top and activate
+            self.user32.SetForegroundWindow(hwnd)
+            
+            # Release ALT
+            self.user32.keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+            
+            # Just to be absolutely sure it's on top visually
+            HWND_TOP = 0
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            self.user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
                 
             # Verify Focus
             return self.user32.GetForegroundWindow() == hwnd
             
         except Exception as e:
             logger.warning(f"Failed to focus window: {e}")
+            return False
+
+    def move_to_main_screen(self, hwnd: int) -> bool:
+        if not self.user32:
+            return False
+        try:
+            # Get primary monitor bounds (0, 0 is top left of primary monitor)
+            screen_width = self.user32.GetSystemMetrics(0)
+            screen_height = self.user32.GetSystemMetrics(1)
+            
+            class RECT(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long),
+                            ("top", ctypes.c_long),
+                            ("right", ctypes.c_long),
+                            ("bottom", ctypes.c_long)]
+            rect = RECT()
+            self.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            width = rect.right - rect.left
+            height = rect.bottom - rect.top
+            
+            # Center it on the main screen
+            x = (screen_width - width) // 2
+            y = (screen_height - height) // 2
+            
+            # Ensure it's not off-screen if it's larger than the screen
+            x = max(0, x)
+            y = max(0, y)
+            
+            SWP_NOZORDER = 0x0004
+            SWP_NOSIZE = 0x0001
+            
+            self.user32.SetWindowPos(hwnd, 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to move window to main screen: {e}")
             return False
 
     def minimize_window(self, hwnd: int) -> bool:

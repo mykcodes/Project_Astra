@@ -8,7 +8,7 @@
  * in the system store. It does NOT manage state itself.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import { useSystemStore } from '@/state/systemStore.ts';
 import { OrbState, OrbEvent } from './types.ts';
 import { Particles } from './Particles.tsx';
@@ -54,7 +54,6 @@ export function Orb() {
     [handleClick],
   );
 
-  const containerRef = useRef<HTMLDivElement>(null);
 
   return (
     <InitializationWrapper>

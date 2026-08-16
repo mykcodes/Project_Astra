@@ -11,6 +11,14 @@ FastAPI application factory with:
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 import time
+import sys
+import asyncio
+
+if sys.platform == "win32":
+    # Monkey-patch to force Uvicorn to use ProactorEventLoop, which is required by Playwright.
+    # Uvicorn explicitly sets WindowsSelectorEventLoopPolicy on Windows, which breaks subprocesses.
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

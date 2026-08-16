@@ -94,6 +94,7 @@ class DesktopController:
             if status["windows"]:
                 best_hwnd = status["windows"][0]["hwnd"]
                 window_manager.restore_and_focus(best_hwnd)
+                window_manager.move_to_main_screen(best_hwnd)
                 
             logger.info("APPLICATION_FOCUS_COMPLETED", extra={"application": application_name})
             new_status = self.get_application_status(application_name, blocked_apps=blocked_apps)
@@ -227,6 +228,7 @@ class DesktopController:
         if status["windows"]:
             best_hwnd = status["windows"][0]["hwnd"]
             window_manager.restore_and_focus(best_hwnd)
+            window_manager.move_to_main_screen(best_hwnd)
             await asyncio.sleep(0.5)
             
         new_status = self.get_application_status(application_name, blocked_apps=blocked_apps)
