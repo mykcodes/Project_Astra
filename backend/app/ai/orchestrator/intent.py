@@ -14,20 +14,22 @@ class NormalizedIntent(BaseModel):
     domain: IntentDomain
     action: str
     target: Optional[str] = None
+    browser_name: Optional[str] = None
+    expected_outcome: Optional[str] = None
     parameters: Dict[str, Any] = Field(default_factory=dict)
     
     @classmethod
-    def desktop(cls, action: str, target: str, **kwargs):
-        return cls(domain=IntentDomain.DESKTOP, action=action, target=target, parameters=kwargs)
+    def desktop(cls, action: str, target: str, expected_outcome: Optional[str] = None, **kwargs):
+        return cls(domain=IntentDomain.DESKTOP, action=action, target=target, expected_outcome=expected_outcome, parameters=kwargs)
         
     @classmethod
-    def system(cls, action: str, **kwargs):
-        return cls(domain=IntentDomain.SYSTEM, action=action, parameters=kwargs)
+    def system(cls, action: str, expected_outcome: Optional[str] = None, **kwargs):
+        return cls(domain=IntentDomain.SYSTEM, action=action, expected_outcome=expected_outcome, parameters=kwargs)
         
     @classmethod
-    def browser(cls, action: str, target: str, **kwargs):
-        return cls(domain=IntentDomain.BROWSER, action=action, target=target, parameters=kwargs)
+    def browser(cls, action: str, target: str, browser_name: Optional[str] = None, expected_outcome: Optional[str] = None, **kwargs):
+        return cls(domain=IntentDomain.BROWSER, action=action, target=target, browser_name=browser_name, expected_outcome=expected_outcome, parameters=kwargs)
         
     @classmethod
-    def filesystem(cls, action: str, target: str, **kwargs):
-        return cls(domain=IntentDomain.FILESYSTEM, action=action, target=target, parameters=kwargs)
+    def filesystem(cls, action: str, target: str, expected_outcome: Optional[str] = None, **kwargs):
+        return cls(domain=IntentDomain.FILESYSTEM, action=action, target=target, expected_outcome=expected_outcome, parameters=kwargs)

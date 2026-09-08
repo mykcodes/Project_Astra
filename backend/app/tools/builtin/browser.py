@@ -16,12 +16,16 @@ class ExecuteBrowserIntentTool(Tool):
         "properties": {
             "intent": {
                 "type": "string",
-                "enum": ["SEARCH", "NAVIGATE", "STATUS"],
+                "enum": ["SEARCH", "NAVIGATE", "STATUS", "NEW_TAB"],
                 "description": "The high-level action to perform."
             },
             "target": {
                 "type": "string",
                 "description": "URL for NAVIGATE, or query for SEARCH."
+            },
+            "browser_name": {
+                "type": "string",
+                "description": "The name of the browser to use (e.g. Chrome, Brave). Defaults to the active or default browser."
             },
             "_verify_only": {
                 "type": "boolean"
@@ -40,7 +44,8 @@ class ExecuteBrowserIntentTool(Tool):
         if intent == "STATUS":
             return await browser_provider.get_state()
             
-        return await browser_provider.execute_intent(intent, target)
+        browser_name = kwargs.get("browser_name")
+        return await browser_provider.execute_intent(intent, target, browser_name)
 
 class InteractBrowserTool(Tool):
     name = "interact_browser"
@@ -68,6 +73,10 @@ class InteractBrowserTool(Tool):
                 "type": "string",
                 "description": "The text to type for the TYPE/FILL action."
             },
+            "browser_name": {
+                "type": "string",
+                "description": "The name of the browser to use. Defaults to the active browser session."
+            },
             "_verify_only": {
                 "type": "boolean"
             }
@@ -80,4 +89,5 @@ class InteractBrowserTool(Tool):
         if kwargs.get("_verify_only"):
             return await browser_provider.check_challenges()
             
-        return await browser_provider.interact(action, target, value)
+        browser_name = kwargs.get("browser_name")
+        return await browser_provider.interact(action, target, value, browser_name)

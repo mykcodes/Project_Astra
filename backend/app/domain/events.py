@@ -20,6 +20,15 @@ class ExecutionEventType(str, Enum):
     GOAL_COMPLETED = "GOAL_COMPLETED"
     GOAL_FAILED = "GOAL_FAILED"
     ASSISTANT_RESPONSE = "ASSISTANT_RESPONSE"
+    GOAL_VERIFYING = "GOAL_VERIFYING"
+    GOAL_CANCELLED = "GOAL_CANCELLED"
+    OBSERVATION_CREATED = "OBSERVATION_CREATED"
+    TARGET_RESOLVED = "TARGET_RESOLVED"
+    ACTION_STARTED = "ACTION_STARTED"
+    ACTION_EXECUTED = "ACTION_EXECUTED"
+    ACTION_VERIFICATION_RESULT = "ACTION_VERIFICATION_RESULT"
+    BROWSER_SESSION_RECOVERED = "BROWSER_SESSION_RECOVERED"
+    USER_VERIFICATION_RESOLVED = "USER_VERIFICATION_RESOLVED"
 
 class ExecutionEvent(BaseModel):
     event_type: ExecutionEventType = Field(description="The type of execution event.")
@@ -30,6 +39,9 @@ class ExecutionEvent(BaseModel):
     state: str = Field(description="Internal machine-readable state of the event.")
     progress_label: str = Field(description="Human-readable progress label (e.g. 'Opening browser', 'Searching').")
     payload: Optional[Dict[str, Any]] = Field(default=None, description="Optional payload containing event specifics (e.g., text for assistant response, or error details).")
+    observation_id: Optional[str] = Field(default=None, description="The associated observation ID, if any.")
+    browser_session_id: Optional[str] = Field(default=None, description="The associated browser session ID, if any.")
+    page_id: Optional[str] = Field(default=None, description="The associated page ID, if any.")
 
     def to_sse_json(self) -> str:
         return self.model_dump_json()

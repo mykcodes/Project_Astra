@@ -16,6 +16,7 @@ from app.tools.registry import registry
 from app.tools.executor import executor
 from app.domain.goals import Goal
 from app.domain.events import ExecutionEvent, ExecutionEventType
+from app.domain.execution_context import ExecutionContext
 
 logger = get_logger(__name__)
 
@@ -34,93 +35,54 @@ CORE RULES:
 9. NEVER claim an application is installed, running, or opened without querying the environment and receiving verified action success.
 10. If the environment engine returns ambiguity, ask the user for clarification.
 11. NEVER hallucinate or guess URLs for videos, music, or web pages. When asked to play a video (e.g. on YouTube), ALWAYS use the browser SEARCH intent, then use interact_browser to CLICK the correct result. NEVER use NAVIGATE with a fabricated video URL.
+12. ABSOLUTELY PROHIBITED: Do NOT ask for procedural confirmation (e.g., "Would you like me to...", "Should I proceed?", "Shall I search?"). The user's request is an instruction. Formulate a multi-step goal plan and execute it autonomously.
+13. A multi-step request (e.g., "Open Brave, go to YouTube, and search for a video") is ONE autonomous goal. DO NOT generate single tool calls and pause to ask the user. Submit a complete goal plan with all required tasks.
+14. Maintain context. "Search there" means the currently active browser session.
 
 Keep spoken responses reasonably concise, as they will be read aloud. Provide more detail when explicitly requested.
 Avoid conversational filler like "umm" or "Here's the answer". Do not use markdown formatting like asterisks or code blocks unless requested.
+
+CURRENT CONTEXT SUMMARY:
+{context_summary}
 """
 
 class ConversationSession:
     def __init__(self, provider: AIProvider):
         self.provider = provider
-        self.history: list[AIMessage] = [
-            AIMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT)
-        ]
+        self.execution_context = ExecutionContext(execution_id=str(uuid.uuid4()))
+        self.history: list[AIMessage] = []
+        self._update_system_prompt()
+        
+    def _update_system_prompt(self):
+        summary = f"Browser: {self.execution_context.active_browser_identity or 'None'}\n"
+        summary += f"Page: {self.execution_context.current_title or 'None'}\n"
+        summary += f"URL: {self.execution_context.current_url or 'None'}\n"
+        summary += f"Last Action: {self.execution_context.last_action or 'None'}\n"
+        
+        if self.history and self.history[0].role == MessageRole.SYSTEM:
+            self.history[0] = AIMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT.format(context_summary=summary))
+        else:
+            self.history.insert(0, AIMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT.format(context_summary=summary)))
 
     async def chat(self, user_message: str) -> str:
         """
         Sends a user message, maintains history, and returns the response.
         """
-        self.history.append(AIMessage(role=MessageRole.USER, content=user_message))
-        
-        settings = get_settings()
-        max_calls = getattr(settings, "astra_tool_max_calls_per_turn", 10)
-        
-        try:
-            turn_executed_calls = set()
-            
-            for _ in range(max_calls):
-                tools = [t.get_definition() for t in registry.list_tools()] if getattr(settings, "astra_tools_enabled", True) else None
-                request = AIRequest(
-                    messages=self.history,
-                    temperature=0.7,
-                    tools=tools
-                )
-                
-                response = await self.provider.generate(request)
-                self.history.append(AIMessage(
-                    role=MessageRole.ASSISTANT, 
-                    content=response.content,
-                    tool_calls=response.tool_calls
-                ))
-                
-                if not response.tool_calls:
-                    return response.content or ""
-                    
-                # Execute tool calls
-                for tool_call in response.tool_calls:
-                    # Duplicate check
-                    args_str = json.dumps(tool_call.arguments, sort_keys=True) if isinstance(tool_call.arguments, dict) else str(tool_call.arguments)
-                    call_signature = (tool_call.name, args_str)
-                    
-                    if call_signature in turn_executed_calls:
-                        logger.warning("TOOL_CALL_DUPLICATE_BLOCKED", extra={"tool_name": tool_call.name})
-                        error_payload = json.dumps({
-                            "error_type": "DUPLICATE_CALL_BLOCKED",
-                            "message": "This action was blocked because you already performed the exact same action with the same arguments in this turn."
-                        })
-                        self.history.append(AIMessage(
-                            role=MessageRole.TOOL,
-                            content=error_payload,
-                            tool_call_id=tool_call.id,
-                            name=tool_call.name
-                        ))
-                        continue
-                        
-                    turn_executed_calls.add(call_signature)
-                    
-                    from app.ai.orchestrator.action_executor import action_executor
-                    
-                    raw_result = await action_executor.execute_tool_call(tool_call)
-                    
-                    self.history.append(AIMessage(
-                        role=MessageRole.TOOL,
-                        content=json.dumps(raw_result),
-                        tool_call_id=tool_call.id,
-                        name=tool_call.name
-                    ))
-                    
-            logger.warning("TOOL_LOOP_LIMIT_REACHED")
-            return "I needed to perform too many actions and had to stop."
-            
-        except Exception as e:
-            logger.error(f"Error during AI orchestration: {e}")
-            self.history.pop() 
-            raise
+        response_text = ""
+        async for chunk in self.chat_stream(user_message):
+            try:
+                # If it's a JSON event, ignore it for the plain text response
+                json.loads(chunk)
+            except json.JSONDecodeError:
+                # It's a text chunk
+                response_text += chunk
+        return response_text
 
     async def chat_stream(self, user_message: str) -> AsyncIterator[str]:
         """
         Sends a user message, maintains history, and yields the response as a stream.
         """
+        self._update_system_prompt()
         self.history.append(AIMessage(role=MessageRole.USER, content=user_message))
         
         settings = get_settings()
@@ -136,14 +98,12 @@ class ConversationSession:
             # Wrap in a tool
             submit_goal_tool = ToolDefinition(
                 name="submit_goal_plan",
-                description="Submit a multi-step semantic goal plan to achieve the user's objective.",
+                description="Submit a multi-step semantic goal plan to achieve the user's objective. Use this tool for ALL tasks.",
                 parameters=GoalPlanRequest.model_json_schema()
             )
             
-            # Allow fallback to regular tools for single actions, but prioritize goal
+            # Remove raw tool fallbacks to force semantic decomposition
             tools = [submit_goal_tool]
-            if getattr(settings, "astra_tools_enabled", True):
-                tools.extend([t.get_definition() for t in registry.list_tools()])
                 
             request = AIRequest(
                 messages=self.history,
@@ -167,65 +127,84 @@ class ConversationSession:
                         break
                         
                 if not goal_plan:
-                    # Raw tool calls exist, build a dynamic Goal
-                    from app.domain.goals import Task, TaskState, Intent, Action
-                    from app.ai.orchestrator.action_executor import action_executor
-                    
-                    tasks = []
-                    for call in response.tool_calls:
-                        try:
-                            intent = action_executor._normalize_tool_call(call)
-                            
-                            goal_intent = Intent(
-                                intent_id=str(uuid.uuid4()),
-                                capability_id=call.name,
-                                parameters=call.arguments
-                            )
-                            
-                            tasks.append(Task(
-                                task_id=str(uuid.uuid4()),
-                                description=f"Execute {intent.action} on {intent.target or 'system'}",
-                                intents=[goal_intent],
-                                state=TaskState.PLANNING,
-                                actions_taken=[]
-                            ))
-                        except Exception as e:
-                            logger.warning(f"Could not normalize tool call {call.name} to Intent: {e}")
-                            
-                    if tasks:
-                        goal_plan = Goal(
-                            goal_id=str(uuid.uuid4()),
-                            objective="Execute requested actions",
-                            tasks=tasks,
-                            is_complete=False
-                        )
+                    logger.warning("LLM did not submit a goal plan.")
                         
-            # Phase 9B.1: Single Execution Authority
+            # Phase 9B.3.1: Strict Execution Authority in GoalRuntime with Persistent Context
             if goal_plan:
                 from app.ai.orchestrator.runtime import GoalRuntime
                 
                 # We append the LLM's thought process (the tool call) so history is consistent
+                # but we do NOT yield any conversational text during planning/execution.
                 self.history.append(AIMessage(
                     role=MessageRole.ASSISTANT,
-                    content=response.content or "",
+                    content="", # Suppress intermediate text
                     tool_calls=response.tool_calls
                 ))
                 
-                runtime = GoalRuntime(goal_plan)
+                self.execution_context.goal = goal_plan
+                
+                from app.ai.orchestrator.compiler import ActionCompiler
+                compiler = ActionCompiler()
+                compiled_goal = await compiler.compile(goal_plan, self.execution_context)
+                
+                runtime = GoalRuntime(compiled_goal, context=self.execution_context)
                 
                 async for event in runtime.run():
                     # Stream structured events immediately
                     yield event.to_sse_json() + "\n"
                     
-                # Append tool result pseudo-message to satisfy the LLM that the tool finished
+                # Build verified execution summary for the final response
+                completed_tasks = [t.description for t in runtime.goal.tasks if getattr(t.state, "value", str(t.state)) == "COMPLETED"]
+                failed_tasks = [t.description for t in runtime.goal.tasks if getattr(t.state, "value", str(t.state)) == "FAILED"]
+                
+                goal_state_str = getattr(runtime.goal.state, "value", "UNKNOWN") if hasattr(runtime.goal, "state") else ("COMPLETED" if runtime.goal.is_complete else "FAILED")
+                
+                execution_summary = {
+                    "goal_state": goal_state_str,
+                    "completed_tasks": completed_tasks,
+                    "failed_tasks": failed_tasks,
+                    "verified_environment_state": runtime.context.environment_snapshot
+                }
+                
+                strict_invariant = ""
+                if goal_state_str == "COMPLETED":
+                    strict_invariant = "INVARIANT: The goal succeeded. You may claim success."
+                elif goal_state_str == "FAILED":
+                    strict_invariant = "INVARIANT: The goal FAILED. You MUST NOT claim success under any circumstances. Report the failure and mention which tasks failed."
+                elif goal_state_str == "CANCELLED":
+                    strict_invariant = "INVARIANT: The goal was CANCELLED by the user. State clearly that the action was cancelled."
+                else:
+                    strict_invariant = "INVARIANT: The goal requires user action (WAITING). You MUST ask the user to intervene (e.g. solve a CAPTCHA or confirm an action)."
+
                 self.history.append(AIMessage(
                     role=MessageRole.TOOL,
-                    content=f"Goal Execution Finished. State: {'COMPLETED' if goal_plan.is_complete else 'FAILED'}.",
+                    content=f"Goal Execution Finished.\nExecution Summary: {json.dumps(execution_summary)}\n\n{strict_invariant}\nYou MUST summarize the final state truthfully based ONLY on these verified facts.",
                     tool_call_id=response.tool_calls[0].id if response.tool_calls else str(uuid.uuid4()),
-                    name="submit_goal_plan"
+                    name=response.tool_calls[0].name if response.tool_calls else "submit_goal_plan"
                 ))
                 
-                # Final token-streamed response after Goal terminal state
+                if goal_state_str in ("FAILED", "CANCELLED", "WAITING_FOR_USER"):
+                    # Deterministic terminal response bypass
+                    if goal_state_str == "FAILED":
+                        failed_tasks_str = ", ".join(failed_tasks) if failed_tasks else "unknown"
+                        final_text = f"⚠️ Execution failed: {failed_tasks_str}."
+                    elif goal_state_str == "WAITING_FOR_USER":
+                        final_text = "⏸️ Waiting for your action: Please complete the required steps in the browser or application."
+                    else:
+                        final_text = "⛔ Execution cancelled."
+                        
+                    yield ExecutionEvent(
+                        event_type=ExecutionEventType.ASSISTANT_RESPONSE,
+                        execution_id=runtime.execution_id,
+                        state="RESPONDING",
+                        progress_label="Generating deterministic response",
+                        payload={"text": final_text}
+                    ).to_sse_json() + "\n"
+                    
+                    self.history.append(AIMessage(role=MessageRole.ASSISTANT, content=final_text))
+                    return
+                
+                # Final token-streamed response after Goal terminal state (SUCCESS path)
                 final_request = AIRequest(messages=self.history, temperature=0.7)
                 final_response = []
                 response_execution_id = runtime.execution_id

@@ -26,6 +26,11 @@ class BrowserTargetResolver:
             # Exact name match
             if el.name.lower().strip() == target_description:
                 return el
+
+        # If it was an ID but didn't match, it's stale. Do not semantic search for "ast-"
+        if target_description.startswith("ast-"):
+            logger.warning(f"Target {target_description} is a stale observation ID. Rejecting.")
+            return None
                 
         # Level 2: Deterministic Semantic Ranking
         scored_elements = []

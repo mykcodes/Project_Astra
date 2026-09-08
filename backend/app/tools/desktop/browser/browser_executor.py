@@ -10,11 +10,11 @@ class BrowserActionExecutor:
     Executes concrete browser actions on Playwright.
     """
     
-    async def navigate(self, url: str) -> dict:
-        if not browser_session.browser or not browser_session.current_page:
-            res = await browser_session.launch_browser()
-            if not res["success"]:
-                return res
+    async def navigate(self, url: str, new_tab: bool = False) -> dict:
+        if not browser_session.browser:
+            return {"success": False, "error": {"code": "BROWSER_NOT_RUNNING", "message": "Browser is not currently running. Cannot navigate."}}
+        if not new_tab and not browser_session.current_page:
+            return {"success": False, "error": {"code": "BROWSER_NOT_RUNNING", "message": "Browser has no active page. Cannot navigate."}}
 
         async def _nav():
             try:
@@ -22,7 +22,13 @@ class BrowserActionExecutor:
                 if not nav_url.startswith(("http://", "https://", "file://")):
                     nav_url = "https://" + nav_url
                     
-                page = browser_session.current_page
+                if new_tab:
+                    context = browser_session.browser.contexts[0] if browser_session.browser.contexts else await browser_session.browser.new_context()
+                    page = await context.new_page()
+                    browser_session.current_page_index = len(context.pages) - 1
+                else:
+                    page = browser_session.current_page
+                    
                 try:
                     await page.goto(nav_url, wait_until="commit", timeout=15000)
                     try:
@@ -33,7 +39,8 @@ class BrowserActionExecutor:
                     logger.warning(f"Navigation error for {nav_url}: {e}")
                     await asyncio.sleep(2.0)
                 
-                return {"success": True, "message": f"Navigated to {nav_url}"}
+                await asyncio.sleep(1.0) # Additional stability wait
+                return {"success": True, "action_executed": True, "verified": False, "message": f"Navigated to {nav_url}"}
             except Exception as e:
                 return {"success": False, "message": f"Navigation failed: {str(e)}"}
                 
@@ -41,7 +48,7 @@ class BrowserActionExecutor:
         
     async def interact(self, action: str, target_id: Optional[str] = None, value: Optional[str] = None) -> dict:
         if not browser_session.browser or not browser_session.current_page:
-            return {"success": False, "message": "No active browser page."}
+            return {"success": False, "error": {"code": "BROWSER_NOT_RUNNING", "message": "Browser is not currently running. Cannot interact."}}
             
         async def _act():
             try:
@@ -60,7 +67,7 @@ class BrowserActionExecutor:
                     except Exception:
                         pass
                     await asyncio.sleep(1.0)
-                    return {"success": True, "message": f"Clicked on target"}
+                    return {"success": True, "action_executed": True, "verified": False, "message": f"Clicked on target"}
                     
                 elif action in ("TYPE", "FILL"):
                     if not selector or not value: return {"success": False, "message": f"{action} requires target and value."}
@@ -77,26 +84,26 @@ class BrowserActionExecutor:
                         except:
                             pass
                     
-                    return {"success": True, "message": f"Typed text into target"}
+                    return {"success": True, "action_executed": True, "verified": False, "message": f"Typed text into target"}
                     
                 elif action == "PRESS_KEY":
                     key = target_id or value
                     if not key: return {"success": False, "message": "PRESS_KEY requires a key string."}
                     await page.keyboard.press(key)
-                    return {"success": True, "message": f"Pressed key {key}"}
+                    return {"success": True, "action_executed": True, "verified": False, "message": f"Pressed key {key}"}
                     
                 elif action == "SCROLL":
                     direction = (target_id or "down").lower()
                     amount = 500 if direction == "down" else -500
                     await page.evaluate(f"window.scrollBy(0, {amount})")
-                    return {"success": True, "message": f"Scrolled {direction}"}
+                    return {"success": True, "action_executed": True, "verified": False, "message": f"Scrolled {direction}"}
                     
                 elif action == "READ_DOM":
                     if selector:
                         element = await page.query_selector(selector)
                         if element:
                             text = await element.inner_text()
-                            return {"success": True, "content": text}
+                            return {"success": True, "action_executed": True, "verified": False, "content": text}
                         return {"success": False, "message": f"Target not found."}
                     else:
                         text = await page.evaluate("document.body.innerText")

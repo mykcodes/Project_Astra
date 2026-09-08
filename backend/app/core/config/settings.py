@@ -48,15 +48,15 @@ class Settings(BaseSettings):
     # ========================
     # AI Provider
     # ========================
-    astra_ai_provider: str = "gemini"
+    astra_ai_provider: str = "groq"
     
     # Gemini
-    astra_ai_model: str = "gemini-3.6-flash"
+    astra_ai_model: str = "gemini-1.5-flash"
     gemini_api_key: str = ""
     
     # Groq
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "qwen/qwen3.8-27b"
     
     # Local Provider
     astra_local_enabled: bool = False
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     astra_offline_mode: bool = False
 
     # Provider Resilience
-    astra_ai_fallback_providers: str = "groq"
+    astra_ai_fallback_providers: str = ""
     astra_provider_cooldown_seconds: int = 60
 
     # ========================

@@ -13,12 +13,37 @@ def test_entity_serialization():
     entity_str = entity.model_dump_json()
     assert "Website" in entity_str
 
-def test_world_state_separation():
-    obs_entity = Entity(id="2", entity_type=EntityType.WINDOW, name="Browser")
-    inf_entity = Entity(id="3", entity_type=EntityType.PERSON, name="John")
-    ws = WorldState(timestamp="2026-08-14T10:00:00Z", observed_state=[obs_entity], inferred_state=[inf_entity])
-    assert len(ws.observed_state) == 1
-    assert len(ws.inferred_state) == 1
+def test_world_state_construction():
+    from datetime import datetime
+    from app.domain.entities import (
+        SystemInfo, ApplicationIdentity, ApplicationInfo, TriState,
+        ObservationMetadata, ObservationStatus
+    )
+    
+    sys_info = SystemInfo(
+        os_name="Windows", os_version="10", machine_name="TEST-PC",
+        timestamp="2026-08-14T10:00:00Z"
+    )
+    
+    app_ident = ApplicationIdentity(
+        canonical_name="chrome", display_name="Google Chrome"
+    )
+    
+    app_info = ApplicationInfo(
+        identity=app_ident, running=TriState.TRUE
+    )
+    
+    obs_meta = ObservationMetadata(
+        timestamp=datetime.now(), source="test", status=ObservationStatus.SUCCESS
+    )
+    
+    ws = WorldState(
+        system=sys_info, applications=[app_info], observation=obs_meta
+    )
+    
+    assert len(ws.applications) == 1
+    assert ws.applications[0].identity.canonical_name == "chrome"
+    assert ws.applications[0].running == TriState.TRUE
 
 def test_capability_provider():
     perm = Permission(permission_id="fs:read", description="Read files", is_granted=True)

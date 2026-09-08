@@ -62,6 +62,30 @@ class ToolRegistry:
         
     def get_capabilities(self) -> List[str]:
         return sorted([c.value for c in self._capabilities])
+        
+    def resolve_capability(self, capability_id: str) -> str:
+        """
+        Maps a semantic capability ID to an executable tool name.
+        Provides a single authoritative boundary between semantic planning and execution.
+        """
+        mapping = {
+            "browser.navigate": "execute_browser_intent",
+            "browser.search": "execute_browser_intent",
+            "browser.interact": "execute_browser_intent",
+            "browser.click": "interact_browser",
+            "browser.play": "interact_browser",
+            "browser.pause": "interact_browser",
+            "browser.input": "interact_browser",
+            "browser.status": "execute_browser_intent",
+            "desktop.open_application": "execute_application_intent",
+            "desktop.focus_application": "execute_application_intent",
+            "system.generic": "generic_tool",
+            "system.status": "get_system_info"
+        }
+        resolved = mapping.get(capability_id)
+        if not resolved:
+            raise ToolNotFoundError(f"Capability resolution failed: Unknown capability ID '{capability_id}'")
+        return resolved
 
 # Global registry instance
 registry = ToolRegistry()

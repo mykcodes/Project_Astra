@@ -126,20 +126,22 @@ class WindowManager:
             else:
                 self.user32.ShowWindow(hwnd, 5) # SW_SHOW
                 
-            # Trick to force foreground: Simulate Alt key press/release
-            # This temporarily disables Windows' foreground lock mechanism
-            VK_MENU = 0x12
-            KEYEVENTF_EXTENDEDKEY = 0x0001
-            KEYEVENTF_KEYUP = 0x0002
+            fg_hwnd = self.user32.GetForegroundWindow()
+            my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
             
-            # Press ALT
-            self.user32.keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY, 0)
+            attached = False
+            fg_thread = 0
             
-            # Bring window to the top and activate
-            self.user32.SetForegroundWindow(hwnd)
+            if fg_hwnd:
+                fg_thread = self.user32.GetWindowThreadProcessId(fg_hwnd, None)
+                if fg_thread and fg_thread != my_thread:
+                    attached = bool(self.user32.AttachThreadInput(my_thread, fg_thread, True))
             
-            # Release ALT
-            self.user32.keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+            try:
+                self.user32.SetForegroundWindow(hwnd)
+            finally:
+                if attached:
+                    self.user32.AttachThreadInput(my_thread, fg_thread, False)
             
             # Just to be absolutely sure it's on top visually
             HWND_TOP = 0

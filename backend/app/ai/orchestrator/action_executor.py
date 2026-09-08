@@ -1,8 +1,7 @@
 import json
 import uuid
 from typing import Any, Dict
-from app.ai.orchestrator.intent import NormalizedIntent, IntentDomain
-from app.ai.orchestrator.action_planner import ActionPlanner, ActionPlan
+from app.domain.goals import VerificationResult, FailureClass, Intent
 from app.ai.orchestrator.verification import VerificationEngine
 from app.tools.executor import executor
 from app.ai.providers.types import ToolCall
@@ -14,20 +13,24 @@ class ActionExecutor:
     """Executes ActionPlans, manages bounded retries, and enforces Action Result Contracts."""
     
     def __init__(self):
-        self.planner = ActionPlanner()
         self.verifier = VerificationEngine()
         
-    async def execute_tool_call(self, tool_call: ToolCall, max_attempts: int = 2) -> Dict[str, Any]:
-        """Intercepts a tool call, translates it to an intent, executes via ToolExecutor, and enforces Action Result Contracts."""
+    async def execute_intent(self, intent: Intent, tool_args: Dict[str, Any], max_attempts: int = 1) -> Dict[str, Any]:
+        """Executes a semantic intent via ToolExecutor and enforces Action Result Contracts."""
         
-        # 1. Normalize the intent from the raw LLM tool call
-        try:
-            intent = self._normalize_tool_call(tool_call)
-        except Exception as e:
-            logger.warning(f"Failed to normalize tool call: {e}")
-            # Fallback to direct execution without retry/verification if we don't understand it
-            raw_result = await executor.execute(tool_call)
-            return self._build_raw_result(raw_result)
+        from app.tools.registry import registry
+        
+        # 1. Resolve semantic capability to executable tool name
+        executable_tool_name = registry.resolve_capability(intent.capability_id)
+        
+        # 1.5 Sanitize arguments dynamically based on tool schema (to avoid validation failures)
+        tool = registry.get(executable_tool_name)
+        if tool and hasattr(tool, "schema") and isinstance(tool.schema, dict):
+            if "properties" in tool.schema:
+                allowed_keys = set(tool.schema["properties"].keys())
+                tool_args = {k: v for k, v in tool_args.items() if k in allowed_keys}
+        
+        tool_call = ToolCall(id=str(uuid.uuid4()), name=executable_tool_name, arguments=tool_args)
 
         attempts = 0
         last_error = None
@@ -35,9 +38,8 @@ class ActionExecutor:
         
         while attempts < max_attempts:
             attempts += 1
-            logger.info(f"ACTION_EXECUTION_ATTEMPT", extra={"intent": intent.action, "attempt": attempts})
+            logger.info(f"ACTION_EXECUTION_ATTEMPT", extra={"intent": intent.action, "attempt": attempts, "tool": executable_tool_name})
             
-            # Execute the underlying tool
             tool_result = await executor.execute(tool_call)
             
             if not tool_result.success:
@@ -47,97 +49,132 @@ class ActionExecutor:
             try:
                 result_data = json.loads(tool_result.result)
             except json.JSONDecodeError:
-                result_data = {"raw": tool_result.result}
+                result_data = {"raw": tool_result.result, "action_executed": True, "error": {"code": "RESULT_PUBLICATION_ERROR", "message": "Result serialization failed"}}
                 
             last_diagnostics = result_data
+            action_executed = result_data.get("action_executed", True) # Assume executed if tool_result.success=True unless specified
             
-            verified = False
-            state_after = "UNKNOWN"
-            state_before = "UNKNOWN"
-            
-            # Verify based on domain
-            if intent.domain == IntentDomain.DESKTOP:
-                state_after = result_data.get("state", "UNKNOWN")
-                verified = self.verifier.verify_desktop_action(intent.action, intent.target, state_after, result_data.get("pids", []))
-                
-                if not verified and not result_data.get("success", False):
-                    last_error = result_data.get("reason", "Action verification failed")
-                    continue
+            # Check for HUMAN_VERIFICATION_REQUIRED block from tools
+            if not result_data.get("success", False):
+                err = result_data.get("error", {})
+                if isinstance(err, dict) and err.get("code") == "HUMAN_VERIFICATION_REQUIRED":
+                    last_error = err
+                    break
                     
-                verified = result_data.get("success", False)
-                if not verified:
-                    last_error = result_data.get("reason", "Desktop controller reported failure")
-                    continue
-                
-            elif intent.domain == IntentDomain.SYSTEM:
-                verified = self.verifier.verify_system_action(intent.parameters.get("requested_fields", []), result_data)
-                if not verified:
-                    last_error = "System information missing requested fields."
-                    continue
-            else:
-                verified = result_data.get("success", True)
-                if not verified:
-                    last_error = result_data.get("error") or result_data.get("message") or "Operation failed"
-                    if isinstance(last_error, dict) and last_error.get("code") == "HUMAN_VERIFICATION_REQUIRED":
-                        break
-                    continue
+            verification_result = None
             
-            if verified:
+            # Verify based on domain (semantic capability domain)
+            if intent.capability_id.startswith("browser."):
+                provider_verified = result_data.get("verified", False)
+                provider_success = result_data.get("success", False)
+                
+                # Reconstruct a formal VerificationResult
+                if provider_verified:
+                    verification_result = VerificationResult(
+                        verified=True,
+                        verification_type=intent.action,
+                        expected_state=intent.target,
+                        actual_state="Verified by provider",
+                        observation_id=result_data.get("observation_id")
+                    )
+                else:
+                    failure_code = None
+                    err_code = result_data.get("error", {}).get("code", "") if isinstance(result_data.get("error"), dict) else ""
+                    if err_code == "PLAYBACK_NOT_CONFIRMED":
+                        failure_code = FailureClass.VERIFICATION_FAILED
+                    elif err_code == "TARGET_RESOLUTION_FAILED":
+                        failure_code = FailureClass.TARGET_NOT_FOUND
+                    elif err_code == "BROWSER_NOT_RUNNING":
+                        failure_code = FailureClass.BROWSER_CLOSED
+                    elif err_code == "VERIFICATION_FAILED":
+                        failure_code = FailureClass.VERIFICATION_FAILED
+                    elif err_code == "RESULT_PUBLICATION_ERROR":
+                        failure_code = FailureClass.UNKNOWN
+                    elif not provider_success:
+                        failure_code = FailureClass.EXECUTION_FAILED
+                    else:
+                        failure_code = FailureClass.VERIFICATION_FAILED
+                        
+                    verification_result = VerificationResult(
+                        verified=False,
+                        verification_type=intent.action,
+                        expected_state=intent.target,
+                        actual_state="Unverified or Failed",
+                        failure_code=failure_code,
+                        observation_id=result_data.get("observation_id"),
+                        evidence=result_data.get("error", {}).get("message", "Provider could not verify.") if isinstance(result_data.get("error"), dict) else str(result_data.get("error", ""))
+                    )
+                    
+            elif intent.capability_id.startswith("desktop."):
+                state_after = result_data.get("state", "UNKNOWN")
+                is_verified = self.verifier.verify_desktop_action(intent.action, intent.target, state_after, result_data.get("pids", []))
+                
+                verification_result = VerificationResult(
+                    verified=is_verified,
+                    verification_type="DESKTOP",
+                    expected_state=intent.action,
+                    actual_state=state_after,
+                    failure_code=None if is_verified else FailureClass.VERIFICATION_FAILED
+                )
+                
+            elif intent.capability_id.startswith("system."):
+                is_verified = self.verifier.verify_system_action(intent.parameters.get("requested_fields", []), result_data)
+                verification_result = VerificationResult(
+                    verified=is_verified,
+                    verification_type="SYSTEM",
+                    expected_state="Data Returned",
+                    actual_state="Data Returned" if is_verified else "Missing Data",
+                    failure_code=None if is_verified else FailureClass.VERIFICATION_FAILED
+                )
+            else:
+                # Default domain
+                is_verified = result_data.get("success", False)
+                verification_result = VerificationResult(
+                    verified=is_verified,
+                    verification_type="GENERIC",
+                    expected_state="Success",
+                    actual_state="Success" if is_verified else "Failed",
+                    failure_code=None if is_verified else FailureClass.VERIFICATION_FAILED
+                )
+            
+            if verification_result and verification_result.verified:
                 result_payload = {
                     "success": True,
                     "action": intent.action,
                     "target": intent.target or "system",
-                    "state_before": state_before,
-                    "state_after": state_after,
                     "verified": True,
                     "attempts": attempts,
-                    "confidence": 0.98,
                     "error": None,
-                    "diagnostics": result_data
+                    "diagnostics": result_data,
+                    "verification_result": verification_result,
+                    "session_id": result_data.get("session_id"),
+                    "observation_id": result_data.get("observation_id"),
+                    "action_executed": action_executed
                 }
-                from app.ai.context.engine import context_engine
-                context_engine.update_context(intent.action, intent.target, result_payload)
                 return result_payload
+            else:
+                last_error = result_data.get("error") or result_data.get("message") or "Action failed or could not be verified."
+                break
                 
-        # If we exhausted attempts or encountered a critical human verification block
         failure_code = "EXECUTION_FAILED"
-        if isinstance(last_error, dict) and last_error.get("code") == "HUMAN_VERIFICATION_REQUIRED":
-            failure_code = "HUMAN_VERIFICATION_REQUIRED"
-            error_details = last_error.get("message", "Human verification required")
+        if isinstance(last_error, dict) and last_error.get("code"):
+            failure_code = last_error.get("code")
+        elif 'verification_result' in locals() and verification_result and verification_result.failure_code:
+            failure_code = getattr(verification_result.failure_code, "name", str(verification_result.failure_code))
+            
+        if failure_code == "HUMAN_VERIFICATION_REQUIRED":
+            error_details = last_error.get("message", "Human verification required") if isinstance(last_error, dict) else "Human verification required"
         else:
             error_details = last_error or "Max attempts reached without verification"
             
         failure_payload = self._build_failure_result(error_details, attempts, last_diagnostics, failure_code)
         failure_payload["action"] = intent.action
         failure_payload["target"] = intent.target or "system"
-        failure_payload["state_before"] = "UNKNOWN"
-        failure_payload["state_after"] = "UNKNOWN"
-        from app.ai.context.engine import context_engine
-        context_engine.update_context(intent.action, intent.target, failure_payload)
+        failure_payload["action_executed"] = locals().get("action_executed", False)
+        if 'verification_result' in locals() and verification_result:
+            failure_payload["verification_result"] = verification_result
+            
         return failure_payload
-
-    def _normalize_tool_call(self, tool_call: ToolCall) -> NormalizedIntent:
-        name = tool_call.name
-        args = tool_call.arguments
-        
-        if name == "execute_application_intent":
-            return NormalizedIntent.desktop(action=args.get("intent"), target=args.get("application"))
-        elif name == "get_system_info":
-            return NormalizedIntent.system(action="get_info", requested_fields=args.get("sections", []))
-        elif name == "open_url":
-            return NormalizedIntent.browser(action="open_url", target=args.get("url"))
-        elif name == "list_directory":
-            return NormalizedIntent.filesystem(action="list", target=args.get("path"))
-        elif name == "search_files":
-            return NormalizedIntent.filesystem(action="search", target=args.get("path"), query=args.get("query"))
-        elif name == "create_folder":
-            return NormalizedIntent.filesystem(action="create_folder", target=args.get("path"))
-        elif name == "execute_browser_intent":
-            return NormalizedIntent.browser(action=args.get("intent"), target=args.get("target"))
-        elif name == "interact_browser":
-            return NormalizedIntent.browser(action=args.get("action"), target=args.get("target"), value=args.get("value"))
-        
-        raise ValueError(f"Cannot normalize unknown tool: {name}")
 
     def _build_raw_result(self, tool_result) -> Dict[str, Any]:
         if tool_result.success:
