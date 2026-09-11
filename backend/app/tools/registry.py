@@ -21,6 +21,7 @@ class Capability(str, Enum):
     FILE_MODIFICATION = "FILE_MODIFICATION"
     SYSTEM_TIME = "SYSTEM_TIME"
     INTERACTION = "INTERACTION"
+    PHYSICAL_INPUT = "PHYSICAL_INPUT"
 
 class ToolRegistry:
     def __init__(self):
@@ -79,6 +80,8 @@ class ToolRegistry:
             "browser.status": "execute_browser_intent",
             "desktop.open_application": "execute_application_intent",
             "desktop.focus_application": "execute_application_intent",
+            "desktop.close_application": "execute_application_intent",
+            "desktop.physical_input": "execute_physical_input",
             "system.generic": "generic_tool",
             "system.status": "get_system_info"
         }

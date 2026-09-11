@@ -48,12 +48,34 @@ class ExecuteApplicationIntentTool(Tool):
         except json.JSONDecodeError:
             blocked_apps = []
             
-        try:
-            intent_enum = ApplicationIntent(intent)
-        except ValueError:
-            return {"success": False, "message": f"Invalid intent: {intent}"}
+        # 1. Resolve Canonical Identity
+        from app.environment.application.state_engine import state_engine
+        
+        status = state_engine.get_state(application)
+        resolution = status.get("resolution", {})
+        
+        if resolution.get("status") != "RESOLVED":
+            return {
+                "success": False,
+                "requested_name": application,
+                "installed": False,
+                "reason": "Application not found or blocked"
+            }
             
-        result = await desktop_controller.execute_intent(intent_enum, application, blocked_apps=blocked_apps)
+        entity = resolution["candidate"]
+        hwnds = [w["hwnd"] for w in status.get("windows", [])]
+        pids = status.get("pids", [])
+            
+        # 2. Delegate to Interaction Router
+        from app.interaction.router import interaction_router
+        
+        try:
+            result = await interaction_router.route(intent, entity, hwnds=hwnds, pids=pids)
+        except Exception as e:
+            return {"success": False, "reason": str(e)}
+            
+        # 3. Embed canonical identity for ActionExecutor verification
+        result["canonical_name"] = entity.canonical_name
         return result
 
 class OpenUrlTool(Tool):

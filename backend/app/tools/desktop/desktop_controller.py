@@ -252,6 +252,39 @@ class DesktopController:
         new_status = self.get_application_status(application_name, blocked_apps=blocked_apps)
         return {"success": True, "state": new_status["state"]}
 
+    def actuate_open(self, entity: ApplicationEntity) -> bool:
+        """Physical action to open an application without verification loop."""
+        try:
+            self._launch(entity)
+            return True
+        except Exception as e:
+            logger.error("ACTUATION_OPEN_FAILED", extra={"canonical_name": entity.canonical_name, "error": str(e)})
+            return False
+
+    def actuate_close(self, hwnds: list[int], pids: list[int]) -> bool:
+        """Physical action to close application windows and processes without verification loop."""
+        acted = False
+        if hwnds:
+            for hwnd in hwnds:
+                window_manager.close_window(hwnd)
+                acted = True
+                
+        if not acted and pids:
+            for pid in pids:
+                process_manager.terminate_process_tree(pid)
+                acted = True
+        return acted
+
+    def actuate_focus(self, hwnds: list[int]) -> bool:
+        """Physical action to focus an application window without verification loop."""
+        if not hwnds:
+            return False
+            
+        best_hwnd = hwnds[0]
+        window_manager.restore_and_focus(best_hwnd)
+        window_manager.move_to_main_screen(best_hwnd)
+        return True
+
     def _launch(self, entity: ApplicationEntity):
         if entity.application_type in (ApplicationType.WIN32, ApplicationType.GAME):
             if sys.platform == "win32":

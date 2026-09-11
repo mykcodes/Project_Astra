@@ -3,6 +3,7 @@ import urllib.parse
 from app.core.logging.logger import get_logger
 from app.domain.goals import VerificationResult, FailureClass
 from app.tools.desktop.browser.browser_observation import BrowserObservation
+from app.domain.entities import TriState
 
 logger = get_logger(__name__)
 
@@ -13,7 +14,7 @@ class VerificationEngine:
     def verify_browser_identity(requested_name: str, actual_name: Optional[str]) -> VerificationResult:
         if not actual_name:
             return VerificationResult(
-                verified=False,
+                verified=TriState.FALSE,
                 verification_type="BROWSER_IDENTITY",
                 expected_state=requested_name,
                 actual_state="None",
@@ -29,7 +30,7 @@ class VerificationEngine:
                 evidence="Browser identity matches."
             )
         return VerificationResult(
-            verified=False,
+            verified=TriState.FALSE,
             verification_type="BROWSER_IDENTITY",
             expected_state=requested_name,
             actual_state=actual_name,
@@ -46,7 +47,7 @@ class VerificationEngine:
             
             if domain in obs_domain or obs_domain in domain or expected_url.lower() in obs.url.lower():
                 return VerificationResult(
-                    verified=True,
+                    verified=TriState.TRUE,
                     verification_type="NAVIGATION",
                     expected_state=expected_url,
                     actual_state=obs.url,
@@ -57,7 +58,7 @@ class VerificationEngine:
             pass
             
         return VerificationResult(
-            verified=False,
+            verified=TriState.FALSE,
             verification_type="NAVIGATION",
             expected_state=expected_url,
             actual_state=obs.url,
@@ -78,7 +79,7 @@ class VerificationEngine:
                 evidence="URL indicates search results."
             )
         return VerificationResult(
-            verified=False,
+            verified=TriState.FALSE,
             verification_type="SEARCH",
             expected_state=f"Search for {query}",
             actual_state=obs.url,
@@ -93,7 +94,7 @@ class VerificationEngine:
             for m2 in obs_after.media_elements:
                 if m1.src == m2.src and not m2.paused and m2.current_time > m1.current_time:
                     return VerificationResult(
-                        verified=True,
+                        verified=TriState.TRUE,
                         verification_type="MEDIA_PLAYBACK",
                         expected_state="Playing",
                         actual_state=f"Playing at {m2.current_time}s",
@@ -104,7 +105,7 @@ class VerificationEngine:
         for m in obs_after.media_elements:
             if not m.paused and m.current_time > 0:
                 return VerificationResult(
-                    verified=True,
+                    verified=TriState.TRUE,
                     verification_type="MEDIA_PLAYBACK",
                     expected_state="Playing",
                     actual_state=f"Playing at {m.current_time}s",
@@ -113,7 +114,7 @@ class VerificationEngine:
                 )
                 
         return VerificationResult(
-            verified=False,
+            verified=TriState.FALSE,
             verification_type="MEDIA_PLAYBACK",
             expected_state="Playing",
             actual_state="Not playing",
@@ -134,13 +135,90 @@ class VerificationEngine:
                 evidence="Page signature mutated after click."
             )
         return VerificationResult(
-            verified=False,
+            verified=TriState.FALSE,
             verification_type="CLICK",
             expected_state="State changed",
             actual_state="State unchanged",
             observation_id=obs_after.observation_id,
             failure_code=FailureClass.CLICK_NO_EFFECT,
             evidence="Page signature did not mutate after click."
+        )
+
+    @staticmethod
+    def verify_interaction(action: str, canonical_identity: str, world_before: 'WorldStateDiff', world_after: 'WorldStateDiff') -> VerificationResult:
+        from app.domain.goals import SemanticAction
+        
+        def is_running(world) -> bool:
+            from app.domain.entities import TriState
+            if not world or not world.applications:
+                return False
+            for app in world.applications:
+                if app.identity.canonical_name == canonical_identity and app.running == TriState.TRUE:
+                    return True
+            return False
+
+        if action == SemanticAction.OPEN.value:
+            if is_running(world_after):
+                return VerificationResult(
+                    verified=TriState.TRUE,
+                    verification_type="INTERACTION",
+                    expected_state="Running",
+                    actual_state="Running",
+                    evidence=f"Application '{canonical_identity}' found in running state in WorldState."
+                )
+            return VerificationResult(
+                verified=TriState.FALSE,
+                verification_type="INTERACTION",
+                expected_state="Running",
+                actual_state="Not running",
+                failure_code=FailureClass.VERIFICATION_FAILED,
+                evidence=f"Application '{canonical_identity}' not found running in WorldState."
+            )
+            
+        elif action == SemanticAction.FOCUS.value:
+            fg_app = world_after.foreground.owner_application if world_after and world_after.foreground else None
+            if fg_app == canonical_identity:
+                return VerificationResult(
+                    verified=TriState.TRUE,
+                    verification_type="INTERACTION",
+                    expected_state="Foreground",
+                    actual_state="Foreground",
+                    evidence=f"Application '{canonical_identity}' is the verified foreground owner."
+                )
+            return VerificationResult(
+                verified=TriState.FALSE,
+                verification_type="INTERACTION",
+                expected_state="Foreground",
+                actual_state=f"Foreground: {fg_app}",
+                failure_code=FailureClass.VERIFICATION_FAILED,
+                evidence=f"Application '{canonical_identity}' is not the foreground window owner."
+            )
+            
+        elif action == SemanticAction.CLOSE.value:
+            if not is_running(world_after):
+                return VerificationResult(
+                    verified=TriState.TRUE,
+                    verification_type="INTERACTION",
+                    expected_state="Closed",
+                    actual_state="Closed",
+                    evidence=f"Application '{canonical_identity}' is not running in WorldState."
+                )
+            return VerificationResult(
+                verified=TriState.FALSE,
+                verification_type="INTERACTION",
+                expected_state="Closed",
+                actual_state="Running",
+                failure_code=FailureClass.VERIFICATION_FAILED,
+                evidence=f"Application '{canonical_identity}' is still running in WorldState."
+            )
+            
+        return VerificationResult(
+            verified=TriState.FALSE,
+            verification_type="INTERACTION",
+            expected_state=action,
+            actual_state="Unknown",
+            failure_code=FailureClass.UNKNOWN,
+            evidence=f"Unknown interaction action: {action}"
         )
 
     @staticmethod

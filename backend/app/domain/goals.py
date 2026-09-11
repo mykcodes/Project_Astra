@@ -1,7 +1,7 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
-from app.domain.entities import Entity
+from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, Field, field_validator
+from app.domain.entities import Entity, TriState
 
 class SemanticAction(str, Enum):
     NAVIGATE = "NAVIGATE"
@@ -9,8 +9,11 @@ class SemanticAction(str, Enum):
     PLAY = "PLAY"
     PAUSE = "PAUSE"
     CLICK = "CLICK"
+    DOUBLE_CLICK = "DOUBLE_CLICK"
+    MOVE_MOUSE = "MOVE_MOUSE"
     INPUT = "INPUT"
     OPEN = "OPEN"
+    CLOSE = "CLOSE"
     FOCUS = "FOCUS"
     RETRY = "RETRY"
     REPEAT = "REPEAT"
@@ -28,6 +31,7 @@ class TargetType(str, Enum):
     INPUT = "INPUT"
     ORDINAL_TARGET = "ORDINAL_TARGET"
     URL_OR_SITE = "URL_OR_SITE"
+    COORDINATE = "COORDINATE"
     UNKNOWN = "UNKNOWN"
 
 class TargetOrdinal(str, Enum):
@@ -88,7 +92,7 @@ class ActionExpectation(BaseModel):
     expected_state_changes: Dict[str, Any] = Field(default_factory=dict, description="State keys and their expected new values")
 
 class VerificationResult(BaseModel):
-    verified: bool = Field(description="Whether the requested state was verified")
+    verified: TriState = Field(description="Whether the requested state was verified (TRUE, FALSE, UNKNOWN)")
     confidence: float = Field(default=1.0)
     verification_type: str = Field(default="UNKNOWN")
     expected_state: Optional[str] = None
@@ -96,6 +100,14 @@ class VerificationResult(BaseModel):
     evidence: str = Field(default="")
     observation_id: Optional[str] = None
     failure_code: Optional[FailureClass] = None
+
+    @field_validator('verified', mode='before')
+    def coerce_boolean(cls, v):
+        if v is True:
+            return TriState.TRUE
+        if v is False:
+            return TriState.FALSE
+        return v
 
 class Action(BaseModel):
     action_id: str = Field(description="Unique identifier for this action execution.")

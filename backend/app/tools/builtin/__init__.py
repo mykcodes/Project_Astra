@@ -5,6 +5,7 @@ from app.tools.builtin.applications import ExecuteApplicationIntentTool, OpenUrl
 from app.tools.builtin.filesystem import ListDirectoryTool, SearchFilesTool, CreateFolderTool
 from app.tools.desktop.interaction import ExecuteInteractionIntentTool
 from app.tools.builtin.browser import ExecuteBrowserIntentTool, InteractBrowserTool
+from app.tools.builtin.physical_input import ExecutePhysicalInputTool
 
 def register_builtin_tools():
     """Registers all builtin tools with the global registry."""
@@ -20,6 +21,7 @@ def register_builtin_tools():
         ExecuteInteractionIntentTool(),
         ExecuteBrowserIntentTool(),
         InteractBrowserTool(),
+        ExecutePhysicalInputTool(),
     ]
     
     for tool in tools:

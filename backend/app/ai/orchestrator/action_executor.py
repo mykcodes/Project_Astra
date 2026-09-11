@@ -2,6 +2,7 @@ import json
 import uuid
 from typing import Any, Dict
 from app.domain.goals import VerificationResult, FailureClass, Intent
+from app.domain.entities import TriState
 from app.ai.orchestrator.verification import VerificationEngine
 from app.tools.executor import executor
 from app.ai.providers.types import ToolCall
@@ -40,7 +41,20 @@ class ActionExecutor:
             attempts += 1
             logger.info(f"ACTION_EXECUTION_ATTEMPT", extra={"intent": intent.action, "attempt": attempts, "tool": executable_tool_name})
             
+            from app.environment.awareness import get_awareness_provider
+            
+            is_interaction = intent.capability_id.startswith("interaction.") or intent.capability_id.startswith("desktop.")
+            
+            world_before = None
+            if is_interaction:
+                provider = get_awareness_provider()
+                world_before = provider.observe_world_state()
+            
             tool_result = await executor.execute(tool_call)
+            
+            world_after = None
+            if is_interaction:
+                world_after = provider.observe_world_state()
             
             if not tool_result.success:
                 last_error = tool_result.error
@@ -67,11 +81,10 @@ class ActionExecutor:
             if intent.capability_id.startswith("browser."):
                 provider_verified = result_data.get("verified", False)
                 provider_success = result_data.get("success", False)
-                
                 # Reconstruct a formal VerificationResult
                 if provider_verified:
                     verification_result = VerificationResult(
-                        verified=True,
+                        verified=TriState.TRUE,
                         verification_type=intent.action,
                         expected_state=intent.target,
                         actual_state="Verified by provider",
@@ -96,7 +109,7 @@ class ActionExecutor:
                         failure_code = FailureClass.VERIFICATION_FAILED
                         
                     verification_result = VerificationResult(
-                        verified=False,
+                        verified=TriState.FALSE,
                         verification_type=intent.action,
                         expected_state=intent.target,
                         actual_state="Unverified or Failed",
@@ -105,22 +118,24 @@ class ActionExecutor:
                         evidence=result_data.get("error", {}).get("message", "Provider could not verify.") if isinstance(result_data.get("error"), dict) else str(result_data.get("error", ""))
                     )
                     
-            elif intent.capability_id.startswith("desktop."):
-                state_after = result_data.get("state", "UNKNOWN")
-                is_verified = self.verifier.verify_desktop_action(intent.action, intent.target, state_after, result_data.get("pids", []))
-                
-                verification_result = VerificationResult(
-                    verified=is_verified,
-                    verification_type="DESKTOP",
-                    expected_state=intent.action,
-                    actual_state=state_after,
-                    failure_code=None if is_verified else FailureClass.VERIFICATION_FAILED
-                )
+            elif is_interaction:
+                if intent.capability_id.startswith("desktop.physical_input"):
+                    provider_verified = result_data.get("verified", TriState.UNKNOWN)
+                    verification_result = VerificationResult(
+                        verified=provider_verified if hasattr(TriState, str(provider_verified)) else TriState.UNKNOWN,
+                        verification_type=intent.action,
+                        expected_state="Physical Actuation",
+                        actual_state=str(provider_verified),
+                        failure_code=None if result_data.get("success") else FailureClass.EXECUTION_FAILED
+                    )
+                else:
+                    canonical_identity = result_data.get("canonical_name", intent.target)
+                    verification_result = self.verifier.verify_interaction(intent.action, canonical_identity, world_before, world_after)
                 
             elif intent.capability_id.startswith("system."):
                 is_verified = self.verifier.verify_system_action(intent.parameters.get("requested_fields", []), result_data)
                 verification_result = VerificationResult(
-                    verified=is_verified,
+                    verified=TriState.TRUE if is_verified else TriState.FALSE,
                     verification_type="SYSTEM",
                     expected_state="Data Returned",
                     actual_state="Data Returned" if is_verified else "Missing Data",
@@ -130,19 +145,22 @@ class ActionExecutor:
                 # Default domain
                 is_verified = result_data.get("success", False)
                 verification_result = VerificationResult(
-                    verified=is_verified,
+                    verified=TriState.TRUE if is_verified else TriState.FALSE,
                     verification_type="GENERIC",
                     expected_state="Success",
                     actual_state="Success" if is_verified else "Failed",
                     failure_code=None if is_verified else FailureClass.VERIFICATION_FAILED
                 )
-            
-            if verification_result and verification_result.verified:
+            is_successful_actuation = result_data.get("success", False)
+            if verification_result and (
+                verification_result.verified in (TriState.TRUE, True) or
+                (verification_result.verified == TriState.UNKNOWN and is_successful_actuation)
+            ):
                 result_payload = {
                     "success": True,
                     "action": intent.action,
                     "target": intent.target or "system",
-                    "verified": True,
+                    "verified": verification_result.verified,
                     "attempts": attempts,
                     "error": None,
                     "diagnostics": result_data,
@@ -187,7 +205,7 @@ class ActionExecutor:
     def _build_failure_result(self, error_msg: str, attempts: int = 0, diagnostics: Dict = None, failure_code: str = "EXECUTION_FAILED") -> Dict[str, Any]:
         return {
             "success": False,
-            "verified": False,
+            "verified": TriState.FALSE,
             "error": {
                 "code": failure_code,
                 "message": error_msg

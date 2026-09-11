@@ -50,16 +50,28 @@ class WindowsSystemAwarenessProvider(SystemAwarenessProvider):
             except Exception:
                 pass
             
+    def _resolve_canonical_identity(self, process_name: str) -> str:
+        if not process_name:
+            return "UNKNOWN"
+            
+        p_lower = process_name.lower()
+        for app in catalog.get_all().values():
+            if any(p.lower() == p_lower for p in app.process_names):
+                return app.canonical_name
+        return "UNKNOWN"
+            
     def observe_foreground(self) -> Optional[ForegroundInfo]:
         try:
             fg_win = window_manager.get_foreground_window()
             if not fg_win:
                 return None
             self._hydrate_process_name(fg_win)
+            raw_process = fg_win.process_name or ""
             return ForegroundInfo(
                 handle=fg_win.hwnd,
-                owner_application=fg_win.process_name or "",
-                title=fg_win.title
+                owner_application=self._resolve_canonical_identity(raw_process),
+                title=fg_win.title,
+                process_name=raw_process
             )
         except Exception as e:
             logger.error(f"Failed to observe foreground: {e}")
@@ -81,11 +93,13 @@ class WindowsSystemAwarenessProvider(SystemAwarenessProvider):
                     is_zoomed = self._is_zoomed(hwnd)
                     is_hung = self._is_hung(hwnd)
                     
+                    raw_process = w.process_name or ""
                     return WindowInfo(
                         handle=w.hwnd,
-                        owner_application=w.process_name or "",
+                        owner_application=self._resolve_canonical_identity(raw_process),
                         owner_pid=w.pid,
                         title=w.title,
+                        process_name=raw_process,
                         visible=TriState.TRUE if w.visible else TriState.FALSE,
                         foreground=TriState.TRUE if w.foreground else TriState.FALSE,
                         minimized=TriState.TRUE if w.minimized else TriState.FALSE,
@@ -112,11 +126,13 @@ class WindowsSystemAwarenessProvider(SystemAwarenessProvider):
                 is_zoomed = self._is_zoomed(w.hwnd)
                 is_hung = self._is_hung(w.hwnd)
                 
+                raw_process = w.process_name or ""
                 result.append(WindowInfo(
                     handle=w.hwnd,
-                    owner_application=w.process_name or "",
+                    owner_application=self._resolve_canonical_identity(raw_process),
                     owner_pid=w.pid,
                     title=w.title,
+                    process_name=raw_process,
                     visible=TriState.TRUE if w.visible else TriState.FALSE,
                     foreground=TriState.TRUE if w.foreground else TriState.FALSE,
                     minimized=TriState.TRUE if w.minimized else TriState.FALSE,

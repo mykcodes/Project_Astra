@@ -25,6 +25,10 @@ class Entity(BaseModel):
     name: str = Field(description="Human-readable name or title of the entity.")
     properties: Dict[str, Any] = Field(default_factory=dict, description="Semantic properties specific to the entity type.")
 
+class ScreenPoint(BaseModel):
+    x: int
+    y: int
+
 class TriState(str, Enum):
     TRUE = "TRUE"
     FALSE = "FALSE"
@@ -74,6 +78,7 @@ class WindowInfo(BaseModel):
     owner_application: str
     owner_pid: int
     title: str
+    process_name: Optional[str] = None
     visible: TriState
     foreground: TriState
     minimized: TriState
@@ -85,6 +90,7 @@ class ForegroundInfo(BaseModel):
     handle: int
     owner_application: str
     title: str
+    process_name: Optional[str] = None
 
 class ObservationMetadata(BaseModel):
     timestamp: datetime = Field(description="When the observation was taken")
@@ -103,4 +109,4 @@ class WorldState(BaseModel):
 class Observation(BaseModel):
     observation_id: str = Field(description="Unique identifier for this observation.")
     world_state: WorldState = Field(description="The snapshot of the world resulting from this observation.")
-    evidence: Dict[str, Any] = Field(default_factory=dict, description="Raw evidence collected (e.g., screenshot paths, API responses).")
+    evidence: Dict[str, Any] = Field(default_factory=dict, description="Raw evidence collected (e.g., VisualObservation metadata, API responses). Do NOT store large image blobs here.")

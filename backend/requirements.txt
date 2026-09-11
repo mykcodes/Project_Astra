@@ -27,3 +27,7 @@ uiautomation>=2.0.19
 pywin32>=306
 playwright>=1.40.0
 playwright-stealth==2.0.3
+
+# Capture
+dxcam[cv2,winrt]>=0.3.0
+numpy>=1.24.0
