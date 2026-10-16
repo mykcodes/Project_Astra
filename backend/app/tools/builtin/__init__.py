@@ -6,6 +6,9 @@ from app.tools.builtin.filesystem import ListDirectoryTool, SearchFilesTool, Cre
 from app.tools.desktop.interaction import ExecuteInteractionIntentTool
 from app.tools.builtin.browser import ExecuteBrowserIntentTool, InteractBrowserTool
 from app.tools.builtin.physical_input import ExecutePhysicalInputTool
+from app.tools.builtin.visual_interaction import ExecuteVisualInteractionTool
+from app.environment.visual.interaction import VisualInteractionService
+from app.environment.visual.perception import ocr_perception_provider
 
 def register_builtin_tools():
     """Registers all builtin tools with the global registry."""
@@ -22,6 +25,9 @@ def register_builtin_tools():
         ExecuteBrowserIntentTool(),
         InteractBrowserTool(),
         ExecutePhysicalInputTool(),
+        ExecuteVisualInteractionTool(
+            service=VisualInteractionService(perception_provider=ocr_perception_provider)
+        ),
     ]
     
     for tool in tools:

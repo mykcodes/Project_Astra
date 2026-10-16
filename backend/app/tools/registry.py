@@ -82,6 +82,8 @@ class ToolRegistry:
             "desktop.focus_application": "execute_application_intent",
             "desktop.close_application": "execute_application_intent",
             "desktop.physical_input": "execute_physical_input",
+            "desktop.visual_click": "execute_visual_interaction",
+            "desktop.visual_interaction": "execute_visual_interaction",
             "system.generic": "generic_tool",
             "system.status": "get_system_info"
         }

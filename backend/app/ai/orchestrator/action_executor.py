@@ -128,6 +128,20 @@ class ActionExecutor:
                         actual_state=str(provider_verified),
                         failure_code=None if result_data.get("success") else FailureClass.EXECUTION_FAILED
                     )
+                elif intent.capability_id.startswith("desktop.visual_"):
+                    verification_val = result_data.get("verification", TriState.UNKNOWN)
+                    if isinstance(verification_val, str):
+                        try:
+                            verification_val = TriState(verification_val)
+                        except ValueError:
+                            verification_val = TriState.UNKNOWN
+                    verification_result = VerificationResult(
+                        verified=verification_val,
+                        verification_type="VISUAL_INTERACTION",
+                        expected_state="Visual Click",
+                        actual_state=str(verification_val.value if isinstance(verification_val, TriState) else verification_val),
+                        failure_code=None if result_data.get("success") else FailureClass.EXECUTION_FAILED
+                    )
                 else:
                     canonical_identity = result_data.get("canonical_name", intent.target)
                     verification_result = self.verifier.verify_interaction(intent.action, canonical_identity, world_before, world_after)

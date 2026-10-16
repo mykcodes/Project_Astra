@@ -1,7 +1,6 @@
 from app.tools.base import Tool
 from app.tools.schemas import ToolRisk
 from app.domain.entities import ScreenPoint
-from app.interaction.router import interaction_router
 
 class ExecutePhysicalInputTool(Tool):
     name = "execute_physical_input"
@@ -35,7 +34,7 @@ class ExecutePhysicalInputTool(Tool):
 
     async def execute(self, intent: str, x: int, y: int, **kwargs) -> dict:
         point = ScreenPoint(x=x, y=y)
-        
+        from app.interaction.router import interaction_router
         try:
             result = await interaction_router.route(intent, target_entity=None, hwnds=None, pids=None, point=point)
             return result

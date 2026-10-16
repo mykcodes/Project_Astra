@@ -121,29 +121,56 @@ class MouseController:
         union = INPUT_union(mi=mi)
         return INPUT(0, union)
 
-    def get_cursor_pos(self) -> ScreenPoint:
+    def get_cursor_pos_safe(self) -> Tuple[bool, ScreenPoint]:
+        """Safely queries cursor position, returning (success, point)."""
         if not self.user32:
-            return ScreenPoint(x=0, y=0)
+            return False, ScreenPoint(x=0, y=0)
             
         def _get():
             pt = POINT()
             if self.user32.GetCursorPos(ctypes.byref(pt)):
-                return ScreenPoint(x=pt.x, y=pt.y)
-            return ScreenPoint(x=0, y=0)
+                return True, ScreenPoint(x=pt.x, y=pt.y)
+            return False, ScreenPoint(x=0, y=0)
             
         return self._with_dpi_awareness(_get)
 
-    def actuate_move(self, point: ScreenPoint) -> Dict[str, Any]:
-        if not self._is_valid_coordinate(point):
-            return {"success": False, "error": {"code": "OUT_OF_BOUNDS", "message": f"Coordinate ({point.x}, {point.y}) falls outside known display topology."}}
+    def get_cursor_pos(self) -> ScreenPoint:
+        ok, pt = self.get_cursor_pos_safe()
+        return pt
 
-        vx, vy, vcx, vcy = self._get_virtual_screen_bounds()
+    def _normalize_coordinates(self, point: ScreenPoint) -> Tuple[int, int]:
+        """
+        Maps physical screen coordinates to Windows normalized absolute coordinates [0, 65535].
         
-        # Normalize to 0-65535
-        # The virtual desktop coords: (x - left) * 65535 / width
-        norm_x = int(((point.x - vx) * 65535) / vcx) if vcx > 0 else 0
-        norm_y = int(((point.y - vy) * 65535) / vcy) if vcy > 0 else 0
+        Windows win32k maps normalized coordinates back to pixels via integer bit-shift:
+            pixel = (norm * dimension) >> 16
+        To prevent downward truncation errors and ensure exact pixel accuracy,
+        coordinates are mapped to pixel centers (point + 0.5) in 16-bit fixed-point
+        space (scale 65536) and clamped to the valid Win32 range [0, 65535].
+        """
+        vx, vy, vcx, vcy = self._get_virtual_screen_bounds()
+        if vcx <= 0 or vcy <= 0:
+            return 0, 0
 
+        norm_x = int(((point.x - vx + 0.5) * 65536) / vcx)
+        norm_y = int(((point.y - vy + 0.5) * 65536) / vcy)
+
+        clamped_x = max(0, min(65535, norm_x))
+        clamped_y = max(0, min(65535, norm_y))
+        return clamped_x, clamped_y
+
+    def actuate_move(self, point: ScreenPoint, verify: bool = False) -> Dict[str, Any]:
+        if not self._is_valid_coordinate(point):
+            return {
+                "success": False,
+                "error": {
+                    "code": "OUT_OF_BOUNDS",
+                    "message": f"Coordinate ({point.x}, {point.y}) falls outside known display topology."
+                },
+                "verified": TriState.FALSE
+            }
+
+        norm_x, norm_y = self._normalize_coordinates(point)
         flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
         inp = self._create_mouse_input(norm_x, norm_y, flags)
         
@@ -151,10 +178,59 @@ class MouseController:
             return self._send_input([inp])
             
         success = self._with_dpi_awareness(_move)
-        if success:
-            return {"success": True, "action": "MOVE_MOUSE", "verified": TriState.TRUE}
-        else:
-            return {"success": False, "error": {"code": "ACTUATION_FAILURE", "message": "OS rejected SendInput for MOVE_MOUSE."}}
+        if not success:
+            return {
+                "success": False,
+                "error": {
+                    "code": "ACTUATION_FAILURE",
+                    "message": "OS rejected SendInput for MOVE_MOUSE."
+                },
+                "verified": TriState.UNKNOWN
+            }
+
+        # Actuation was accepted by the OS
+        if verify:
+            ok, observed = self.get_cursor_pos_safe()
+            if not ok:
+                return {
+                    "success": True,
+                    "action": "MOVE_MOUSE",
+                    "actuation_status": "ACTUATION_ACCEPTED",
+                    "verified": TriState.UNKNOWN,
+                    "error": {
+                        "code": "OBSERVATION_UNAVAILABLE",
+                        "message": "Failed to read cursor position for verification."
+                    }
+                }
+            elif observed.x == point.x and observed.y == point.y:
+                return {
+                    "success": True,
+                    "action": "MOVE_MOUSE",
+                    "actuation_status": "ACTUATION_ACCEPTED",
+                    "verified": TriState.TRUE,
+                    "observed_point": {"x": observed.x, "y": observed.y}
+                }
+            else:
+                return {
+                    "success": True,
+                    "action": "MOVE_MOUSE",
+                    "actuation_status": "ACTUATION_ACCEPTED",
+                    "verified": TriState.FALSE,
+                    "error": {
+                        "code": "VERIFIED_MISMATCH",
+                        "message": f"Cursor at ({observed.x}, {observed.y}) does not match target ({point.x}, {point.y}).",
+                        "discrepancy": {"x": observed.x - point.x, "y": observed.y - point.y}
+                    },
+                    "observed_point": {"x": observed.x, "y": observed.y}
+                }
+
+        # Default (unverified): OS accepted actuation, verification awaiting observation
+        return {
+            "success": True,
+            "action": "MOVE_MOUSE",
+            "actuation_status": "ACTUATION_ACCEPTED",
+            "verified": TriState.UNKNOWN
+        }
 
     def actuate_click(self, point: ScreenPoint) -> Dict[str, Any]:
         move_result = self.actuate_move(point)
@@ -165,10 +241,8 @@ class MouseController:
         flags_down = MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
         flags_up = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
         
-        # We must include coordinates in down/up as well when using ABSOLUTE | VIRTUALDESK
-        vx, vy, vcx, vcy = self._get_virtual_screen_bounds()
-        norm_x = int(((point.x - vx) * 65535) / vcx) if vcx > 0 else 0
-        norm_y = int(((point.y - vy) * 65535) / vcy) if vcy > 0 else 0
+        # Consistent normalization for click events
+        norm_x, norm_y = self._normalize_coordinates(point)
         
         inp_down = self._create_mouse_input(norm_x, norm_y, flags_down)
         inp_up = self._create_mouse_input(norm_x, norm_y, flags_up)
