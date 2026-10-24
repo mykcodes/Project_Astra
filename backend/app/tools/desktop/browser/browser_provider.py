@@ -50,8 +50,14 @@ class BrowserProvider:
         """Handles high-level navigation intents like SEARCH or NAVIGATE."""
         intent = intent.upper()
         
-        if browser_name:
-            ensure_res = await self.ensure_browser_session(browser_name)
+        target_browser = browser_name
+        if not target_browser and not browser_session.browser:
+            default_b = browser_registry.get_default_browser()
+            if default_b:
+                target_browser = default_b.canonical_name
+
+        if target_browser:
+            ensure_res = await self.ensure_browser_session(target_browser)
             if not ensure_res["success"]:
                 return ensure_res
         

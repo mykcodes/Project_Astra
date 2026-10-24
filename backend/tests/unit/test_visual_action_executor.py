@@ -94,7 +94,7 @@ async def test_action_executor_executes_visual_click_intent():
         assert result["verified"] == TriState.UNKNOWN
         assert result["action_executed"] is True
         assert result["diagnostics"]["actuation_success"] is True
-        mock_service.execute_click.assert_awaited_once_with(query="Settings", min_confidence=0.5)
+        mock_service.execute_click.assert_awaited_once_with(query="Settings", min_confidence=0.5, recheck_pre_actuation=True)
 
 
 # ── 4. Permission Enforcement Audit ──

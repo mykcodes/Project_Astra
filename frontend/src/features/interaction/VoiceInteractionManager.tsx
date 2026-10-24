@@ -36,7 +36,10 @@ export function VoiceInteractionManager() {
             const audioBlob = await microphoneService.stopRecording();
             
             console.log('TRANSCRIPTION_STARTED');
-            const transcript = await voiceClient.transcribeAudio(audioBlob);
+            const transcript = await voiceClient.transcribeAudio(audioBlob, {
+              clientTimestampMs: microphoneService.lastRecordingStartMs,
+              durationMs: microphoneService.lastRecordingDurationMs,
+            });
             console.log('TRANSCRIPTION_COMPLETED');
             
             if (!transcript) throw new Error("Empty transcript");

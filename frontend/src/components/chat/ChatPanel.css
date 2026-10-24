@@ -114,3 +114,94 @@
 .chat-panel-input input:focus {
   border-color: var(--color-primary);
 }
+
+/* Clarification & Consequential Confirmation */
+.clarification-card {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.clarification-prompt {
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+}
+
+.clarification-impact {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.clarification-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.clarification-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.clarification-chip:hover {
+  border-color: var(--color-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.clarification-chip.recommended {
+  border-color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.confirmation-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.confirm-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.confirm-btn.approve {
+  background: #e53e3e;
+  color: #ffffff;
+  border: none;
+}
+
+.confirm-btn.approve:hover {
+  background: #c53030;
+}
+
+.confirm-btn.reject {
+  background: transparent;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
+.confirm-btn.reject:hover {
+  background: var(--color-border);
+}
+

@@ -77,4 +77,12 @@ class BrowserIdentityRegistry:
         logger.warning(f"Could not resolve browser identity for requested name: {name}")
         return None
 
+    def get_default_browser(self) -> Optional[BrowserIdentity]:
+        """Returns the first installed and recognized browser."""
+        for candidate in ["chrome", "brave", "edge", "firefox"]:
+            b = self.resolve_browser(candidate)
+            if b:
+                return b
+        return None
+
 browser_registry = BrowserIdentityRegistry()

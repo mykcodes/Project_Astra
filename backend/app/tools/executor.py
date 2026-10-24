@@ -53,6 +53,19 @@ class ToolExecutor:
                 logger.warning("TOOL_VALIDATION_FAILED", extra={"tool_name": tool_call.name, "error": f"JSON parsing failed: {error_msg}"})
                 raise ToolValidationError(f"Your tool call arguments were malformed JSON: {error_msg}. Raw: {raw_args}")
                 
+            # Pre-validation sanitization: omit non-required keys with None values if the schema property doesn't accept 'null'
+            cleaned_args = {}
+            properties = tool.schema.get("properties", {}) if isinstance(tool.schema, dict) else {}
+            required = set(tool.schema.get("required", [])) if isinstance(tool.schema, dict) else set()
+            for k, v in tool_call.arguments.items():
+                if v is None and k not in required:
+                    prop_schema = properties.get(k, {})
+                    prop_type = prop_schema.get("type")
+                    if prop_type != "null" and not (isinstance(prop_type, list) and "null" in prop_type):
+                        continue
+                cleaned_args[k] = v
+            tool_call.arguments = cleaned_args
+
             try:
                 jsonschema.validate(instance=tool_call.arguments, schema=tool.schema)
             except ValidationError as ve:

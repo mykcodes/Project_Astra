@@ -10,6 +10,12 @@ class SemanticAction(str, Enum):
     PAUSE = "PAUSE"
     CLICK = "CLICK"
     DOUBLE_CLICK = "DOUBLE_CLICK"
+    RIGHT_CLICK = "RIGHT_CLICK"
+    SCROLL = "SCROLL"
+    DRAG = "DRAG"
+    HOTKEY = "HOTKEY"
+    PRESS_KEY = "PRESS_KEY"
+    TYPE_TEXT = "TYPE_TEXT"
     MOVE_MOUSE = "MOVE_MOUSE"
     INPUT = "INPUT"
     OPEN = "OPEN"
@@ -71,9 +77,11 @@ class FailureClass(str, Enum):
     CAPTCHA_DETECTED = "CAPTCHA_DETECTED"
     POPUP_OPENED = "POPUP_OPENED"
     CLICK_NO_EFFECT = "CLICK_NO_EFFECT"
+    WINDOW_NOT_FOCUSED = "WINDOW_NOT_FOCUSED"
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
     UNKNOWN = "UNKNOWN"
     EXECUTION_FAILED = "EXECUTION_FAILED"
+
 
 class Intent(BaseModel):
     intent_id: str = Field(description="Unique identifier for the intent.")
@@ -124,6 +132,14 @@ class Task(BaseModel):
     expected_outcome: Optional[str] = Field(default=None, description="Expected outcome of the task.")
     state: TaskState = Field(default=TaskState.PLANNING, description="Current lifecycle state of the task.")
     actions_taken: List[Action] = Field(default_factory=list, description="History of actions executed for this task.")
+    composite_sequence: Optional[Any] = Field(default=None, description="Optional CompositeActionSequence for Phase B.6 multi-step composite execution.")
+
+class PlanValidationResult(BaseModel):
+    is_valid: bool = Field(description="Whether the planned goal is valid, supported, and executable.")
+    errors: List[str] = Field(default_factory=list, description="List of fatal validation errors preventing execution.")
+    warnings: List[str] = Field(default_factory=list, description="List of non-fatal warnings or ambiguities noted during plan validation.")
+    failure_class: Optional[FailureClass] = Field(default=None, description="Classified failure type if the plan is invalid.")
+    clarification_request: Optional[Any] = Field(default=None, description="Structured clarification request if plan contains resolvable ambiguity.")
 
 class Goal(BaseModel):
     goal_id: str = Field(description="Unique identifier for the goal.")
@@ -131,3 +147,14 @@ class Goal(BaseModel):
     tasks: List[Task] = Field(default_factory=list, description="The sequence of tasks planned to achieve the goal.")
     state: GoalState = Field(default=GoalState.INTENT_RECEIVED, description="Current lifecycle state of the goal.")
     is_complete: bool = Field(default=False, description="Whether the goal has been successfully achieved.")
+    validation_errors: List[str] = Field(default_factory=list, description="Validation errors if goal failed compilation or validation.")
+    pending_clarification: Optional[Any] = Field(default=None, description="Active clarification or confirmation request awaiting user response.")
+
+from app.domain.composite import (
+    StepStatus,
+    CompositeTerminalStatus,
+    CompensationAction,
+    CompositeStep,
+    CompositeActionSequence,
+    CompositeExecutionResult,
+)

@@ -174,11 +174,14 @@ class OpenAICompatibleRuntime:
                 tool_calls=tool_calls
             )
             
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            logger.warning(f"Local AI runtime unreachable at {self.base_url} ({exc.__class__.__name__}). Provider will fall back.")
+            raise ProviderUnavailableError(f"Local runtime unreachable: {exc}", original_error=exc)
         except httpx.RequestError as exc:
-            logger.error(f"Local runtime request failed: {exc}", exc_info=True)
+            logger.error(f"Local runtime request failed: {exc}")
             raise ProviderUnavailableError(f"Local runtime request failed: {exc}", original_error=exc)
         except Exception as exc:
-            logger.error(f"Error processing local runtime response: {exc}", exc_info=True)
+            logger.error(f"Error processing local runtime response: {exc}")
             raise ProviderUnavailableError(f"Error processing local runtime response: {exc}", original_error=exc)
 
     async def generate_stream(self, request: AIRequest, configured_model: str, default_max_tokens: int, default_temperature: float, fallback_provider_name: str) -> AsyncIterator[AIResponseChunk]:
@@ -275,6 +278,9 @@ class OpenAICompatibleRuntime:
             
             yield AIResponseChunk(content="", is_done=True, tool_calls=tool_calls)
             
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            logger.warning(f"Local AI runtime stream unreachable at {self.base_url} ({exc.__class__.__name__}). Provider will fall back.")
+            raise ProviderUnavailableError(f"Local runtime stream unreachable: {exc}", original_error=exc)
         except httpx.RequestError as exc:
             logger.error(f"Local runtime stream request failed: {exc}")
             raise ProviderUnavailableError(f"Local runtime stream request failed: {exc}", original_error=exc)

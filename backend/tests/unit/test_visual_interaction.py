@@ -150,7 +150,7 @@ async def test_valid_target_reaches_physical_input_boundary():
 async def test_target_provenance_preserved():
     """Provenance must include observation_id, target_id, screen_point, actuation_outcome."""
     obs = make_observation(obs_id="provenance_obs")
-    target = make_target(target_id="provenance_target", obs_id="provenance_obs")
+    target = make_target(target_id="provenance_target", obs_id="provenance_obs", x=200, y=250, w=200, h=200)
     sp = ScreenPoint(x=300, y=350)
     grounded = make_grounded(target, obs, sp)
     
@@ -786,7 +786,9 @@ async def test_provided_observation_is_used():
     sp = ScreenPoint(x=200, y=200)
     grounded = make_grounded(target, obs, sp)
     
-    mock_capture = MagicMock()  # Should NOT be called
+    obs_fresh = make_observation(obs_id="fresh_reground")
+    mock_capture = MagicMock()
+    mock_capture.capture_virtual_screen.return_value = obs_fresh
     
     mock_router = AsyncMock()
     mock_router.route.return_value = {"success": True, "action": "CLICK", "verified": TriState.UNKNOWN}
@@ -805,4 +807,5 @@ async def test_provided_observation_is_used():
     
     assert result.actuation_success is True
     assert result.provenance["observation_id"] == "pre_provided"
-    mock_capture.capture_virtual_screen.assert_not_called()
+    assert result.provenance["regrounded_observation_id"] == "fresh_reground"
+    mock_capture.capture_virtual_screen.assert_called_once()

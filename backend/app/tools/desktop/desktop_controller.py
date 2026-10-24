@@ -48,6 +48,14 @@ class DesktopController:
             "windows": status.get("windows", [])
         }
 
+    def query_application_state(self, application_name: str, force_refresh: bool = False, blocked_apps: list = None) -> dict:
+        """Alias for get_application_status for caller resiliency."""
+        return self.get_application_status(application_name, force_refresh=force_refresh, blocked_apps=blocked_apps)
+
+    async def resolve_application_intent(self, intent: ApplicationIntent, application_name: str, blocked_apps: list = None) -> dict:
+        """Alias for execute_intent for caller resiliency."""
+        return await self.execute_intent(intent, application_name, blocked_apps=blocked_apps)
+
     async def execute_intent(self, intent: ApplicationIntent, application_name: str, blocked_apps: list = None) -> dict:
         logger.info("APPLICATION_INTENT_RESOLVED", extra={"intent": intent.value, "application": application_name})
         
@@ -109,12 +117,22 @@ class DesktopController:
                 "message": "Application is already running and was focused."
             }
 
+        # If process is running without any windows, terminate orphaned background processes first
+        if status["running"] and not status["window_found"] and status.get("pids"):
+            logger.warning("APPLICATION_CLEANUP_ORPHANED_HEADLESS", extra={"application": application_name, "pids": status["pids"]})
+            for pid in status["pids"]:
+                try:
+                    process_manager.terminate_process_tree(pid)
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
+
         try:
             self._launch(entity)
             await asyncio.sleep(2.0)
             
             new_status = self.get_application_status(application_name, blocked_apps=blocked_apps)
-            if new_status["state"] != ApplicationState.INSTALLED_NOT_RUNNING.value:
+            if new_status["state"] != ApplicationState.INSTALLED_NOT_RUNNING.value and (new_status.get("window_found") or new_status.get("windows")):
                 logger.info("APPLICATION_ACTION_VERIFICATION", extra={"action": "OPEN", "application": application_name, "verified": True})
                 return {
                     "success": True,
@@ -124,7 +142,8 @@ class DesktopController:
                     "installed": True,
                     "running": True,
                     "launch_type": entity.application_type.value,
-                    "pids": new_status["pids"]
+                    "pids": new_status["pids"],
+                    "windows": new_status["windows"]
                 }
             else:
                 logger.warning("APPLICATION_RECOVERY_STARTED", extra={"application": application_name})
@@ -202,6 +221,15 @@ class DesktopController:
         await asyncio.sleep(2.0)
             
         new_status = self.get_application_status(application_name, blocked_apps=blocked_apps)
+        if new_status["state"] != ApplicationState.INSTALLED_NOT_RUNNING.value and new_status.get("pids"):
+            for pid in new_status["pids"]:
+                try:
+                    process_manager.terminate_process_tree(pid)
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
+            new_status = self.get_application_status(application_name, blocked_apps=blocked_apps)
+
         if new_status["state"] == ApplicationState.INSTALLED_NOT_RUNNING.value:
             return {
                 "success": True,
@@ -286,7 +314,19 @@ class DesktopController:
         return True
 
     def _launch(self, entity: ApplicationEntity):
-        if entity.application_type in (ApplicationType.WIN32, ApplicationType.GAME):
+        if sys.platform == "win32" and (
+            entity.application_type == ApplicationType.UWP
+            or "windowsapps" in entity.launch_target.lower()
+            or entity.canonical_name == "notepad"
+        ):
+            if entity.canonical_name == "notepad" or "notepad" in entity.launch_target.lower():
+                target = "shell:AppsFolder\\Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"
+            elif entity.app_user_model_id:
+                target = f"shell:AppsFolder\\{entity.app_user_model_id}"
+            else:
+                target = entity.launch_target
+            subprocess.Popen(["explorer.exe", target])
+        elif entity.application_type in (ApplicationType.WIN32, ApplicationType.GAME):
             if sys.platform == "win32":
                 DETACHED_PROCESS = 0x00000008
                 CREATE_NEW_PROCESS_GROUP = 0x00000200

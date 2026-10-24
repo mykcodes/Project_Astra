@@ -144,4 +144,96 @@ class ActionPlanner:
         )
         return ActionPlan(intent=intent, capability=capability, steps=[step])
 
+    def plan_composite_sequence(
+        self,
+        sequence_name: str,
+        steps_def: List[Dict[str, Any]],
+        timeout_seconds: float = 60.0,
+        max_retries_per_step: int = 2,
+        allow_compensation: bool = True,
+    ):
+        """
+        Phase B.6: Compiles a multi-step sequence of semantic actions into an executable
+        CompositeActionSequence with step IDs, indices, and optional safe compensation.
+        """
+        import uuid
+        from app.domain.composite import (
+            CompositeActionSequence,
+            CompositeStep,
+            CompensationAction,
+        )
+        from app.domain.goals import Intent, SemanticAction
+
+        sequence_id = f"seq_{uuid.uuid4().hex[:8]}"
+        composite_steps: List[CompositeStep] = []
+
+        for idx, step_dict in enumerate(steps_def):
+            action_raw = step_dict.get("action", "CLICK")
+            if isinstance(action_raw, str):
+                try:
+                    action_enum = SemanticAction(action_raw.upper())
+                except ValueError:
+                    action_enum = SemanticAction.CLICK
+            else:
+                action_enum = action_raw
+
+            intent = Intent(
+                intent_id=step_dict.get("intent_id", str(uuid.uuid4())),
+                action=action_enum,
+                target=step_dict.get("target"),
+                capability_id=step_dict.get("capability_id", "desktop.physical_input"),
+                parameters=step_dict.get("parameters", {}),
+            )
+
+            compensation = None
+            if "compensation" in step_dict and step_dict["compensation"]:
+                comp_def = step_dict["compensation"]
+                comp_action_raw = comp_def.get("action", "HOTKEY")
+                try:
+                    comp_action_enum = SemanticAction(comp_action_raw.upper())
+                except ValueError:
+                    comp_action_enum = SemanticAction.HOTKEY
+
+                comp_intent = Intent(
+                    intent_id=str(uuid.uuid4()),
+                    action=comp_action_enum,
+                    target=comp_def.get("target"),
+                    capability_id=comp_def.get("capability_id", "desktop.physical_input"),
+                )
+                compensation = CompensationAction(
+                    intent=comp_intent,
+                    tool_args=comp_def.get("tool_args", {}),
+                    description=comp_def.get("description", "Safe compensation action"),
+                )
+
+            comp_step = CompositeStep(
+                step_id=step_dict.get("step_id", f"step_{idx}_{uuid.uuid4().hex[:6]}"),
+                step_index=idx,
+                intent=intent,
+                tool_args=step_dict.get("tool_args", {}),
+                description=step_dict.get("description", f"Step {idx}: {action_enum.value}"),
+                consequential=step_dict.get("consequential", False),
+                required_permission=step_dict.get("required_permission"),
+                compensation=compensation,
+                requires_verification=step_dict.get("requires_verification", False),
+                verifier_type=step_dict.get("verifier_type"),
+                verifier_args=step_dict.get("verifier_args", {}),
+                settle_delay_seconds=step_dict.get("settle_delay_seconds", 0.3),
+                target_app_name=step_dict.get("target_app_name"),
+                target_window_title=step_dict.get("target_window_title"),
+                target_hwnd=step_dict.get("target_hwnd"),
+                ensure_foreground=step_dict.get("ensure_foreground", True),
+            )
+            composite_steps.append(comp_step)
+
+
+        return CompositeActionSequence(
+            sequence_id=sequence_id,
+            name=sequence_name,
+            steps=composite_steps,
+            timeout_seconds=timeout_seconds,
+            max_retries_per_step=max_retries_per_step,
+            allow_compensation=allow_compensation,
+        )
+
 action_planner = ActionPlanner()

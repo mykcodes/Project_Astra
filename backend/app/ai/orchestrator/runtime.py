@@ -1,10 +1,19 @@
 import uuid
-from typing import AsyncGenerator, Dict, Any
+from typing import AsyncGenerator, Dict, Any, Optional, List, Tuple
+from datetime import datetime, timezone
 import asyncio
 
-from app.domain.goals import Goal, Task, TaskState, GoalState, Action, VerificationResult, FailureClass
+from app.domain.goals import Goal, Task, TaskState, GoalState, Action, VerificationResult, FailureClass, SemanticAction
 from app.domain.events import ExecutionEvent, ExecutionEventType
 from app.domain.execution_context import ExecutionContext
+from app.domain.entities import TriState
+from app.domain.composite import StepStatus, CompositeActionSequence, CompositeStep
+from app.domain.checkpoints import (
+    GoalCheckpoint,
+    TaskCheckpoint,
+    ResumptionClassification,
+    SCHEMA_VERSION,
+)
 from app.domain.memory import RecoveryStrategy
 from app.ai.orchestrator.action_executor import action_executor
 from app.ai.providers.types import ToolCall
@@ -16,17 +25,26 @@ logger = get_logger(__name__)
 
 class GoalRuntime:
     """
-    Phase 9C: Stateful Goal Execution Runtime
-    Owns execution of a Goal until terminal state, tracking environment context.
+    Phase B.9: Stateful Goal Execution Runtime with Checkpointing & Resumption
+    Owns execution of a Goal until terminal state, tracking environment context,
+    persisting durable progress checkpoints, and safely resuming across interruptions.
     """
     
-    def __init__(self, goal: Goal, context: ExecutionContext = None):
+    def __init__(
+        self,
+        goal: Goal,
+        context: Optional[ExecutionContext] = None,
+        goal_store: Any = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ):
         self.goal = goal
         self.context = context or ExecutionContext(
             execution_id=str(uuid.uuid4()),
             goal=goal
         )
-        self.cancel_event = asyncio.Event()
+        self.goal_store = goal_store
+        self.cancel_event = cancel_event or asyncio.Event()
+        self._created_at = datetime.now(timezone.utc)
 
     @property
     def execution_id(self) -> str:
@@ -35,6 +53,259 @@ class GoalRuntime:
     def cancel(self):
         """Signals the runtime to cancel execution."""
         self.cancel_event.set()
+
+    def _create_checkpoint(self, suspension_reason: Optional[str] = None) -> GoalCheckpoint:
+        """Constructs a versioned GoalCheckpoint snapshot from the current execution state."""
+        now = datetime.now(timezone.utc)
+        
+        task_cps: List[TaskCheckpoint] = []
+        for idx, t in enumerate(self.goal.tasks):
+            completed_steps: List[int] = []
+            verified_steps: List[int] = []
+            step_statuses: Dict[int, StepStatus] = {}
+            step_verifications: Dict[int, VerificationResult] = {}
+            target_app: Optional[str] = None
+
+            if getattr(t, "composite_sequence", None) and getattr(t.composite_sequence, "steps", None):
+                for s in t.composite_sequence.steps:
+                    if s.target_app_name and not target_app:
+                        target_app = s.target_app_name
+                    step_statuses[s.step_index] = s.status
+                    if s.verification_result:
+                        step_verifications[s.step_index] = s.verification_result
+
+                    if s.actuation_accepted or s.status in (StepStatus.ACTUATION_ACCEPTED, StepStatus.VERIFIED_SUCCESS):
+                        completed_steps.append(s.step_index)
+                    if s.verification_result and s.verification_result.verified == TriState.TRUE and s.status == StepStatus.VERIFIED_SUCCESS:
+                        verified_steps.append(s.step_index)
+            else:
+                for i in t.intents:
+                    if i.target and not target_app:
+                        target_app = str(i.target)
+
+            tcp = TaskCheckpoint(
+                task_id=t.task_id,
+                task_index=idx,
+                description=t.description or f"Task {idx}",
+                task_state=t.state,
+                target_app_name=target_app,
+                completed_step_indices=completed_steps,
+                verified_step_indices=verified_steps,
+                step_statuses=step_statuses,
+                step_verifications=step_verifications,
+                is_verified=(t.state == TaskState.COMPLETED),
+                updated_at=now,
+            )
+            task_cps.append(tcp)
+
+        is_resumable = self.goal.state not in (GoalState.COMPLETED, GoalState.CANCELLED)
+
+        # Build clean environment snapshot without unsafe live objects
+        env_snap = dict(self.context.environment_snapshot or {})
+        if self.context.active_browser_identity:
+            env_snap["browser"] = self.context.active_browser_identity
+        if self.context.current_url:
+            env_snap["url"] = self.context.current_url
+        if self.context.current_title:
+            env_snap["title"] = self.context.current_title
+
+        return GoalCheckpoint(
+            checkpoint_id=str(uuid.uuid4()),
+            schema_version=SCHEMA_VERSION,
+            goal_id=self.goal.goal_id,
+            objective=self.goal.objective,
+            goal_state=self.goal.state,
+            current_task_index=self.context.current_task_index,
+            total_tasks=len(self.goal.tasks),
+            task_checkpoints=task_cps,
+            execution_id=self.context.execution_id,
+            environment_snapshot=env_snap,
+            recovery_history=list(self.context.recovery_history or []),
+            suspension_reason=suspension_reason or self.context.waiting_reason,
+            pending_clarification=getattr(self.context, "pending_clarification", None),
+            is_resumable=is_resumable,
+            created_at=self._created_at,
+            updated_at=now,
+        )
+
+    def _persist_checkpoint(self, suspension_reason: Optional[str] = None) -> Optional[GoalCheckpoint]:
+        """Saves current checkpoint to the configured GoalStore."""
+        try:
+            cp = self._create_checkpoint(suspension_reason=suspension_reason)
+            if self.goal_store:
+                self.goal_store.save_checkpoint(cp)
+            return cp
+        except Exception as e:
+            logger.error(f"Failed to persist GoalCheckpoint for goal '{self.goal.goal_id}': {e}")
+            return None
+
+    @classmethod
+    def resume(
+        cls,
+        checkpoint: GoalCheckpoint,
+        goal: Optional[Goal] = None,
+        goal_store: Optional[Any] = None,
+        context: Optional[ExecutionContext] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> Tuple["GoalRuntime", ResumptionClassification, str]:
+        """
+        Reconstructs a GoalRuntime from a persisted GoalCheckpoint.
+        Performs safety validation, identifies the exact continuation boundary,
+        and clears stale environment handles.
+        Returns: (runtime, classification, summary_message)
+        """
+        is_valid, reason = checkpoint.validate_resumable()
+        if not is_valid:
+            logger.error(f"Resumption rejected for goal '{checkpoint.goal_id}': {reason}")
+            raise ValueError(f"Cannot resume goal '{checkpoint.goal_id}': {reason}")
+
+        # If original Goal object is not passed, reconstruct it from checkpoint metadata
+        if goal is None:
+            tasks = []
+            for tcp in checkpoint.task_checkpoints:
+                t = Task(
+                    task_id=tcp.task_id,
+                    description=tcp.description,
+                    state=tcp.task_state,
+                )
+                tasks.append(t)
+            goal = Goal(
+                goal_id=checkpoint.goal_id,
+                objective=checkpoint.objective,
+                tasks=tasks,
+                state=checkpoint.goal_state,
+            )
+
+        # Reconstruct execution context, stripping ephemeral live handles
+        if context is None:
+            context = ExecutionContext(
+                execution_id=checkpoint.execution_id or str(uuid.uuid4()),
+                goal=goal,
+                current_task_index=checkpoint.current_task_index,
+                completed_tasks=[],
+                recovery_history=list(checkpoint.recovery_history),
+                environment_snapshot=dict(checkpoint.environment_snapshot),
+                pending_clarification=getattr(checkpoint, "pending_clarification", None),
+            )
+        else:
+            if getattr(checkpoint, "pending_clarification", None):
+                context.pending_clarification = checkpoint.pending_clarification
+
+        # Clear ephemeral Win32 handles / stale browser connection IDs
+        context.browser_session_id = None
+        context.active_page_id = None
+        context.environment_snapshot.pop("target_hwnd", None)
+
+        # Determine continuation boundary across tasks
+        resume_task_idx = 0
+        classification = ResumptionClassification.VERIFIED_AND_SAFE
+        summary = f"Resuming goal '{goal.goal_id}'."
+
+        for tcp in checkpoint.task_checkpoints:
+            # Task is already verified complete: retain without repeating
+            if tcp.task_state == TaskState.COMPLETED and tcp.is_verified:
+                if tcp.task_id not in context.completed_tasks:
+                    context.completed_tasks.append(tcp.task_id)
+                if tcp.task_index < len(goal.tasks):
+                    goal.tasks[tcp.task_index].state = TaskState.COMPLETED
+                continue
+
+            # First incomplete or unverified task: continuation boundary
+            resume_task_idx = tcp.task_index
+            if tcp.task_index < len(goal.tasks):
+                active_task = goal.tasks[tcp.task_index]
+                # If task has a composite sequence, slice out completed verified steps
+                if getattr(active_task, "composite_sequence", None) and tcp.verified_step_indices:
+                    seq = active_task.composite_sequence
+                    last_verified_step = max(tcp.verified_step_indices)
+                    remainder_steps = [s for s in seq.steps if s.step_index > last_verified_step]
+                    if remainder_steps:
+                        for new_idx, s in enumerate(remainder_steps):
+                            s.step_index = new_idx
+                            s.status = StepStatus.PENDING
+                        seq.steps = remainder_steps
+                        classification = ResumptionClassification.VERIFIED_AND_SAFE
+                        summary = f"Resuming task {tcp.task_index} at step index {last_verified_step + 1} (skipped {last_verified_step + 1} verified steps)."
+                    else:
+                        classification = ResumptionClassification.VERIFIED_AND_SAFE
+                        summary = f"All steps in task {tcp.task_index} verified; advancing to next task."
+                elif tcp.completed_step_indices and not tcp.verified_step_indices:
+                    # Actuated but unverified: unknown outcome at interruption
+                    classification = ResumptionClassification.REQUIRES_REVERIFICATION
+                    summary = f"Task {tcp.task_index} had unverified actuation at interruption; re-verifying environment state."
+                else:
+                    classification = ResumptionClassification.SAFE_TO_RETRY
+                    summary = f"Resuming task {tcp.task_index} from start."
+            break
+
+        context.current_task_index = resume_task_idx
+        goal.state = GoalState.EXECUTING
+
+        runtime = cls(goal=goal, context=context, goal_store=goal_store)
+        if cancel_event:
+            runtime.cancel_event = cancel_event
+
+        # Checkpoint the fresh resumed state
+        runtime._persist_checkpoint(suspension_reason=None)
+        return runtime, classification, summary
+
+    async def abort_and_rollback(self, reason: str = "Unrecoverable failure") -> Dict[str, Any]:
+        """
+        Executes safe rollback semantics for unrecoverable aborts.
+        Distinguishes:
+        1. Persisted store update (marking checkpoint as non-resumable FAILED).
+        2. Execution of explicit safe compensations for completed reversible steps.
+        Does NOT invent compensations for irreversible actions.
+        """
+        self.goal.state = GoalState.FAILED
+        self.context.waiting_reason = reason
+        
+        executed_compensations: List[Dict[str, Any]] = []
+        unresolved_steps: List[str] = []
+
+        # Iterate through completed tasks in reverse order to execute known compensations
+        for task in reversed(self.goal.tasks):
+            if getattr(task, "composite_sequence", None) and getattr(task.composite_sequence, "steps", None):
+                for step in reversed(task.composite_sequence.steps):
+                    if step.actuation_accepted and step.compensation:
+                        comp = step.compensation
+                        try:
+                            logger.info(f"Rollback executing compensation for step '{step.step_id}': {comp.description}")
+                            res = await action_executor.execute_intent(
+                                comp.intent,
+                                tool_args=comp.tool_args,
+                                max_attempts=1,
+                            )
+                            comp.executed = bool(res.get("success", False))
+                            executed_compensations.append({
+                                "step_id": step.step_id,
+                                "compensation": comp.description,
+                                "success": comp.executed,
+                            })
+                        except Exception as e:
+                            logger.error(f"Rollback compensation failed for step '{step.step_id}': {e}")
+                            unresolved_steps.append(step.step_id)
+                    elif step.actuation_accepted and not step.compensation:
+                        # Irreversible action: truthfully recorded as uncompensated
+                        unresolved_steps.append(step.step_id)
+
+        # Update persisted checkpoint: permanently non-resumable
+        if self.goal_store:
+            abort_msg = f"Aborted: {reason}. Unresolved external actions: {len(unresolved_steps)}"
+            self._persist_checkpoint(suspension_reason=abort_msg)
+            self.goal_store.mark_non_resumable(
+                self.goal.goal_id,
+                reason=abort_msg
+            )
+
+        return {
+            "goal_id": self.goal.goal_id,
+            "goal_state": GoalState.FAILED.value,
+            "is_resumable": False,
+            "reason": reason,
+            "compensations_executed": executed_compensations,
+            "unresolved_steps": unresolved_steps,
+        }
         
     async def run(self) -> AsyncGenerator[ExecutionEvent, None]:
         """Executes the goal tasks sequentially in a stateful manner."""
@@ -42,20 +313,60 @@ class GoalRuntime:
         settings = get_settings()
         goal_timeout = getattr(settings, "astra_goal_execution_timeout_seconds", 600)
         
+        # Phase B.11: Check if goal is suspended waiting for clarification
+        if self.goal.state == GoalState.WAITING_FOR_USER and getattr(self.goal, "pending_clarification", None):
+            self.context.pending_clarification = self.goal.pending_clarification
+            prompt = self.goal.pending_clarification.prompt
+            self.context.waiting_reason = prompt
+            self._persist_checkpoint(suspension_reason=prompt)
+            yield self._create_event(ExecutionEventType.GOAL_ACCEPTED, state="STARTED", progress_label=f"Goal Received: {self.goal.objective}")
+            yield self._create_event(
+                ExecutionEventType.WAITING_FOR_USER,
+                state="WAITING",
+                progress_label=prompt,
+                payload={
+                    "clarification": self.goal.pending_clarification.model_dump(mode="json") if hasattr(self.goal.pending_clarification, "model_dump") else self.goal.pending_clarification,
+                    "waiting_reason": prompt,
+                }
+            )
+            return
+
+        # Fast-fail if goal already failed validation during compilation
+        if self.goal.state == GoalState.FAILED and getattr(self.goal, "validation_errors", None):
+            val_msg = "; ".join(self.goal.validation_errors)
+            logger.warning(f"GoalRuntime aborting execution: Goal validation failed ({val_msg})")
+            self._persist_checkpoint(suspension_reason=f"Validation failed: {val_msg}")
+            yield self._create_event(ExecutionEventType.GOAL_ACCEPTED, state="STARTED", progress_label=f"Goal Received: {self.goal.objective}")
+            yield self._create_event(
+                ExecutionEventType.GOAL_FAILED,
+                state="VALIDATION_FAILED",
+                progress_label=f"Plan validation failed: {val_msg}",
+                payload={"errors": self.goal.validation_errors}
+            )
+            return
+
         self.goal.state = GoalState.EXECUTING
+        self._persist_checkpoint()
         yield self._create_event(ExecutionEventType.GOAL_ACCEPTED, state="STARTED", progress_label=f"Executing Goal: {self.goal.objective}")
         
         try:
             async with asyncio.timeout(goal_timeout):
                 # Execute Tasks
                 for index, task in enumerate(self.goal.tasks):
+                    # Check if already completed and verified (e.g. from checkpoint resumption)
+                    if task.state == TaskState.COMPLETED and task.task_id in self.context.completed_tasks:
+                        logger.info(f"GoalRuntime: Task {index} ('{task.task_id}') already completed in checkpoint; skipping execution.")
+                        continue
+
                     if self.cancel_event.is_set():
                         self.goal.state = GoalState.CANCELLED
+                        self._persist_checkpoint(suspension_reason="Goal cancelled by user")
                         yield self._create_event(ExecutionEventType.GOAL_CANCELLED, state="CANCELLED", progress_label="Goal cancelled by user")
                         return
 
                     self.context.current_task_index = index
                     task.state = TaskState.EXECUTING
+                    self._persist_checkpoint()
                     
                     yield self._create_event(
                         ExecutionEventType.TASK_STARTED, 
@@ -79,12 +390,19 @@ class GoalRuntime:
                                 if wait_for_user:
                                     task.state = TaskState.WAITING_FOR_USER
                                     self.goal.state = GoalState.WAITING_FOR_USER
-                                    self.context.waiting_reason = "CAPTCHA or User Intervention Required"
+                                    clarif = getattr(self.context, "pending_clarification", None)
+                                    prompt = clarif.prompt if clarif else f"Action requires human verification: {task.description}"
+                                    self.context.waiting_reason = prompt
+                                    self._persist_checkpoint(suspension_reason=self.context.waiting_reason)
                                     yield self._create_event(
                                         ExecutionEventType.WAITING_FOR_USER,
                                         task_id=task.task_id,
                                         state="WAITING",
-                                        progress_label=f"Action requires human verification: {task.description}"
+                                        progress_label=prompt,
+                                        payload={
+                                            "clarification": clarif.model_dump(mode="json") if (clarif and hasattr(clarif, "model_dump")) else clarif,
+                                            "waiting_reason": self.context.waiting_reason,
+                                        }
                                     )
                                     return # Terminal state, return immediately for deterministic response
                                 else:
@@ -97,6 +415,7 @@ class GoalRuntime:
                     if not task_success:
                         task.state = TaskState.FAILED
                         self.goal.state = GoalState.FAILED
+                        self._persist_checkpoint()
                         yield self._create_event(
                             ExecutionEventType.TASK_FAILED, 
                             task_id=task.task_id, 
@@ -108,6 +427,7 @@ class GoalRuntime:
                         
                     task.state = TaskState.COMPLETED
                     self.context.completed_tasks.append(task.task_id)
+                    self._persist_checkpoint()
                     yield self._create_event(
                         ExecutionEventType.TASK_COMPLETED, 
                         task_id=task.task_id, 
@@ -117,6 +437,7 @@ class GoalRuntime:
                     
                 # Final Goal Verification
                 self.goal.state = GoalState.VERIFYING
+                self._persist_checkpoint()
                 yield self._create_event(
                     ExecutionEventType.GOAL_VERIFYING,
                     state="VERIFYING",
@@ -128,21 +449,92 @@ class GoalRuntime:
                 if final_verification:
                     self.goal.state = GoalState.COMPLETED
                     self.goal.is_complete = True
+                    self._persist_checkpoint()
                     yield self._create_event(ExecutionEventType.GOAL_COMPLETED, state="COMPLETED", progress_label="Goal achieved and verified")
                 else:
                     self.goal.state = GoalState.FAILED
+                    self._persist_checkpoint()
                     yield self._create_event(ExecutionEventType.GOAL_FAILED, state="VERIFICATION_FAILED", progress_label="Goal execution completed but final verification failed")
                 
         except TimeoutError:
             logger.error("Goal execution timed out.")
             self.goal.state = GoalState.FAILED
+            self._persist_checkpoint(suspension_reason="Goal execution timed out")
             yield self._create_event(ExecutionEventType.GOAL_FAILED, state="TIMEOUT", progress_label="Goal execution timed out")
             return
 
     async def _execute_task(self, task: Task) -> tuple[bool, bool, Any]:
         """
-        Executes a single Task. Returns (success, requires_human_verification, failure_class)
+        Executes a single Task. Returns (success, requires_human_verification, failure_class).
+        Supports both atomic composite sequences (Phase B.6) and sequential task intents.
         """
+        if getattr(task, "composite_sequence", None):
+            from app.domain.composite import CompositeTerminalStatus
+            max_replans = 2
+            replan_attempt = 0
+
+            while True:
+                seq_res = await action_executor.execute_sequence(
+                    task.composite_sequence,
+                    cancel_event=self.cancel_event,
+                )
+                if task.composite_sequence:
+                    task.composite_sequence.steps = seq_res.step_results
+                for step in seq_res.step_results:
+                    task.actions_taken.append(Action(
+                        action_id=step.step_id,
+                        capability_id=step.intent.capability_id,
+                        provider_id="composite_executor",
+                        payload={"step_index": step.step_index, "status": step.status.value, "tool_args": step.tool_args},
+                        verification_result=step.verification_result,
+                    ))
+
+                if seq_res.terminal_status == CompositeTerminalStatus.SUCCESS:
+                    return True, False, None
+                elif seq_res.terminal_status == CompositeTerminalStatus.PERMISSION_DENIED:
+                    if seq_res.error and "clarification_request" in seq_res.error:
+                        from app.domain.clarification import ClarificationRequest
+                        try:
+                            self.context.pending_clarification = ClarificationRequest.model_validate(seq_res.error["clarification_request"])
+                        except Exception as ex:
+                            logger.warning(f"Failed to parse clarification_request from error: {ex}")
+                    return False, True, FailureClass.VERIFICATION_FAILED
+                elif self.cancel_event.is_set() or seq_res.terminal_status == CompositeTerminalStatus.CANCELLED:
+                    return False, False, None
+                else:
+                    fc = FailureClass.VERIFICATION_FAILED
+                    if seq_res.error and seq_res.error.get("code") == "TIMEOUT":
+                        fc = FailureClass.NAVIGATION_TIMEOUT
+                        return False, False, fc
+
+                    strategy = recovery_engine.determine_strategy(fc, self.context.model_dump())
+                    if strategy in (RecoveryStrategy.ABORT_SAFE, RecoveryStrategy.WAIT_FOR_USER):
+                        return False, strategy == RecoveryStrategy.WAIT_FOR_USER, fc
+
+                    # Adaptive re-planning: attempt bounded re-planning if intermediate step failed
+                    if replan_attempt < max_replans and seq_res.failed_step_index is not None:
+                        replan_attempt += 1
+                        failed_idx = seq_res.failed_step_index
+                        logger.info(f"GoalRuntime adaptive re-planning: attempt {replan_attempt}/{max_replans} for failed step {failed_idx}")
+                        self.context.recovery_history.append({
+                            "replan_attempt": replan_attempt,
+                            "failed_step_index": failed_idx,
+                            "failure_code": getattr(fc, "name", str(fc)),
+                            "strategy": strategy.name,
+                        })
+
+                        from app.ai.orchestrator.compiler import action_compiler
+                        repaired_seq = action_compiler.replan_remainder_sequence(
+                            task.composite_sequence,
+                            failed_step_index=failed_idx,
+                            strategy=strategy,
+                        )
+                        if repaired_seq:
+                            task.composite_sequence = repaired_seq
+                            continue
+
+                    return False, False, fc
+
         for intent in task.intents:
             tool_name = intent.capability_id
             
@@ -176,9 +568,9 @@ class GoalRuntime:
                     except Exception as e:
                         logger.warning(f"Failed to fetch fresh observation: {e}")
                 
+                target_val = ""
                 if intent.target:
                     # Strip stale 'ast-' identifiers if the LLM provided them, forcing semantic re-resolution
-                    target_val = ""
                     if hasattr(intent.target, "id"):
                         target_val = intent.target.id
                     elif isinstance(intent.target, dict) and "id" in intent.target:
@@ -195,36 +587,69 @@ class GoalRuntime:
                             target_val = str(intent.parameters["target"])
                         else:
                             target_val = "target" # Generic fallback
-                            
+                elif "target" in intent.parameters:
+                    target_val = str(intent.parameters["target"])
+                elif "query" in intent.parameters:
+                    target_val = str(intent.parameters["query"])
+
+                if target_val:
                     tool_args["target"] = target_val
                     
-                    if intent.capability_id in ("desktop.open_application", "desktop.focus_application", "desktop.close_application"):
-                        tool_args["application"] = tool_args.pop("target", None)
-                        if intent.capability_id == "desktop.open_application":
-                            tool_args["intent"] = "OPEN"
-                        elif intent.capability_id == "desktop.focus_application":
-                            tool_args["intent"] = "FOCUS"
-                        elif intent.capability_id == "desktop.close_application":
-                            tool_args["intent"] = "CLOSE"
-                        # Ensure 'action' is removed so it doesn't fail schema validation (additionalProperties: False)
-                        # Also strip all other semantic compiler parameters (like 'ordinal', 'query', etc.) 
-                        # because execute_application_intent has additionalProperties: False.
-                        tool_args = {
-                            "intent": tool_args["intent"],
-                            "application": tool_args["application"]
-                        }
-                    elif tool_name == "execute_browser_intent" or tool_name == "open_url":
-                        tool_args["target"] = tool_args.pop("target", None)
-                        tool_name = "execute_browser_intent"
-                        new_args = {
-                            "intent": "NAVIGATE",
-                            "target": tool_args.get("target")
-                        }
-                        if "browser_name" in tool_args:
-                            new_args["browser_name"] = tool_args["browser_name"]
-                        if "_current_url" in tool_args:
-                            new_args["_current_url"] = tool_args["_current_url"]
-                        tool_args = new_args
+                from app.tools.registry import registry
+                try:
+                    resolved_tool = registry.resolve_capability(intent.capability_id)
+                except Exception:
+                    resolved_tool = tool_name
+
+                if resolved_tool == "execute_application_intent" or intent.capability_id in ("desktop.open_application", "desktop.focus_application", "desktop.close_application"):
+                    app_name = tool_args.pop("target", None) or target_val or intent.target
+                    app_intent = "OPEN"
+                    if intent.capability_id == "desktop.open_application" or intent.action == SemanticAction.OPEN:
+                        app_intent = "OPEN"
+                    elif intent.capability_id == "desktop.focus_application" or intent.action == SemanticAction.FOCUS:
+                        app_intent = "FOCUS"
+                    elif intent.capability_id == "desktop.close_application" or intent.action == SemanticAction.CLOSE:
+                        app_intent = "CLOSE"
+                    tool_args = {
+                        "intent": app_intent,
+                        "application": str(app_name) if app_name else "notepad"
+                    }
+                elif resolved_tool == "execute_browser_intent" or intent.capability_id.startswith("browser.") or tool_name in ("execute_browser_intent", "open_url"):
+                    browser_intent = "NAVIGATE"
+                    if intent.action == SemanticAction.SEARCH or intent.capability_id == "browser.search":
+                        browser_intent = "SEARCH"
+                    elif str(getattr(intent.action, "value", intent.action)).upper() == "STATUS" or intent.capability_id == "browser.status":
+                        browser_intent = "STATUS"
+                    
+                    target_arg = tool_args.get("target") or target_val
+                    if browser_intent == "SEARCH":
+                        target_arg = tool_args.get("query") or intent.query or target_arg
+                        
+                    new_args = {
+                        "intent": browser_intent,
+                        "target": str(target_arg) if target_arg else ""
+                    }
+                    browser_candidate = tool_args.get("browser_name") or tool_args.get("browser") or self.context.active_browser_identity
+                    if browser_candidate:
+                        new_args["browser_name"] = str(browser_candidate)
+                    if tool_args.get("_current_url"):
+                        new_args["_current_url"] = tool_args["_current_url"]
+                    tool_args = new_args
+                elif resolved_tool == "open_url":
+                    tool_args = {
+                        "url": str(tool_args.get("url") or tool_args.get("target") or target_val)
+                    }
+                elif resolved_tool == "interact_browser":
+                    new_args = {
+                        "action": str(tool_args.get("action") or getattr(intent.action, "value", str(intent.action))).upper(),
+                        "target": str(tool_args.get("target") or target_val),
+                    }
+                    if tool_args.get("value") or tool_args.get("query"):
+                        new_args["value"] = str(tool_args.get("value") or tool_args.get("query"))
+                    browser_candidate = tool_args.get("browser_name") or tool_args.get("browser") or self.context.active_browser_identity
+                    if browser_candidate:
+                        new_args["browser_name"] = str(browser_candidate)
+                    tool_args = new_args
                 
                 yield_event = self._create_event(
                     ExecutionEventType.ACTION_STARTED,

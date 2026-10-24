@@ -46,9 +46,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         },
     )
 
-    # Future: initialize database pool, AI providers, event bus, etc.
+    from app.environment.visual.observer import desktop_observer
+    if settings.environment != "test":
+        desktop_observer.start()
 
     yield
+
+    # Stop desktop observer worker thread deterministically
+    try:
+        desktop_observer.stop()
+    except Exception as e:
+        logger.warning(f"Error stopping desktop observer: {e}")
 
     # Cleanup database pool, close connections, etc.
     from app.ai.providers import get_default_provider

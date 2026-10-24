@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from app.domain.goals import Goal, Intent
+from app.domain.clarification import ClarificationRequest
+
 class ExecutionContext(BaseModel):
     execution_id: str = Field(description="Unique ID for this execution run")
     goal: Optional[Goal] = Field(default=None, description="The goal being executed")
@@ -16,6 +18,7 @@ class ExecutionContext(BaseModel):
     current_title: Optional[str] = Field(default=None, description="Current title of the page")
     
     last_observation_id: Optional[str] = Field(default=None, description="ID of the last observation")
+    aligned_observation_id: Optional[str] = Field(default=None, description="ID of MultimodalObservation aligned to speech utterance onset")
     last_action: Optional[Dict[str, Any]] = Field(default=None, description="The last action taken")
     last_verification: Optional[Dict[str, Any]] = Field(default=None, description="The last verification result")
     
@@ -25,5 +28,7 @@ class ExecutionContext(BaseModel):
     recovery_history: List[Dict[str, Any]] = Field(default_factory=list, description="History of recoveries")
     
     waiting_reason: Optional[str] = Field(default=None, description="Reason for WAITING_FOR_USER state")
+    pending_clarification: Optional[ClarificationRequest] = Field(default=None, description="Active clarification or confirmation request awaiting user response")
     
     environment_snapshot: Dict[str, Any] = Field(default_factory=dict, description="Last known environment snapshot")
+

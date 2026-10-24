@@ -5,6 +5,38 @@ from app.tools.desktop.browser.browser_session import browser_session
 
 logger = get_logger(__name__)
 
+COMMON_BROWSER_SITES = {
+    "youtube": "https://www.youtube.com",
+    "google": "https://www.google.com",
+    "github": "https://github.com",
+    "reddit": "https://www.reddit.com",
+    "twitter": "https://twitter.com",
+    "x": "https://x.com",
+    "amazon": "https://www.amazon.com",
+    "wikipedia": "https://www.wikipedia.org",
+    "netflix": "https://www.netflix.com",
+    "spotify": "https://open.spotify.com",
+    "linkedin": "https://www.linkedin.com",
+    "facebook": "https://www.facebook.com",
+    "instagram": "https://www.instagram.com",
+    "gmail": "https://mail.google.com",
+    "chatgpt": "https://chatgpt.com",
+}
+
+def normalize_browser_url(url: str) -> str:
+    """Normalizes informal website names and relative URLs to fully qualified URLs."""
+    if not url:
+        return "about:blank"
+    trimmed = url.strip()
+    if trimmed.startswith(("http://", "https://", "file://", "about:")):
+        return trimmed
+    clean_key = trimmed.lower().replace("www.", "").rstrip("/")
+    if clean_key in COMMON_BROWSER_SITES:
+        return COMMON_BROWSER_SITES[clean_key]
+    if "." in trimmed.split("/")[0]:
+        return f"https://{trimmed}"
+    return f"https://www.{clean_key}.com"
+
 class BrowserActionExecutor:
     """
     Executes concrete browser actions on Playwright.
@@ -18,9 +50,7 @@ class BrowserActionExecutor:
 
         async def _nav():
             try:
-                nav_url = url
-                if not nav_url.startswith(("http://", "https://", "file://")):
-                    nav_url = "https://" + nav_url
+                nav_url = normalize_browser_url(url)
                     
                 if new_tab:
                     context = browser_session.browser.contexts[0] if browser_session.browser.contexts else await browser_session.browser.new_context()

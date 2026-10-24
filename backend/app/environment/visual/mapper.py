@@ -18,12 +18,20 @@ class VisualCoordinateMapper:
         """
         # 1. Freshness Check
         last_interaction = interaction_tracker.get_last_interaction()
-        if last_interaction > observation.captured_at:
+        obs_time = observation.captured_at
+        if getattr(last_interaction, "tzinfo", None) is not None and getattr(obs_time, "tzinfo", None) is None:
+            from datetime import timezone
+            obs_time = obs_time.replace(tzinfo=timezone.utc)
+        elif getattr(last_interaction, "tzinfo", None) is None and getattr(obs_time, "tzinfo", None) is not None:
+            from datetime import timezone
+            last_interaction = last_interaction.replace(tzinfo=timezone.utc)
+
+        if last_interaction > obs_time:
             raise VisualCaptureError(
                 "STALE_OBSERVATION",
                 f"Observation {observation.observation_id} is stale. "
                 f"A physical interaction occurred at {last_interaction.isoformat()} "
-                f"which is after the capture timestamp {observation.captured_at.isoformat()}."
+                f"which is after the capture timestamp {obs_time.isoformat()}."
             )
             
         # 2. Bounds Check (optional but good practice)

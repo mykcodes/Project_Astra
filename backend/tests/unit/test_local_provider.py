@@ -128,8 +128,8 @@ async def test_successful_local_generation_stream(mock_settings):
     request = AIRequest(messages=[AIMessage(role=MessageRole.USER, content="Hello")])
     
     # Mock httpx response stream
-    mock_response = AsyncMock()
-    mock_response.raise_for_status.return_value = None
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock(return_value=None)
     
     # Mock aiter_lines to yield SSE lines
     async def mock_aiter_lines():

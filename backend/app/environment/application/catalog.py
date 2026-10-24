@@ -138,6 +138,10 @@ class ApplicationCatalog:
                     entity.process_names.add("chatgpt.exe")
                 elif "spotify" in norm_name:
                     entity.process_names.add("spotify.exe")
+                elif "calculator" in norm_name or "calc" in norm_name:
+                    entity.process_names.add("calculatorapp.exe")
+                    entity.process_names.add("calculator.exe")
+                    entity.process_names.add("calc.exe")
                     
         return entity
 

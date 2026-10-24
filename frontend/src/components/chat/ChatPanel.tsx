@@ -9,12 +9,31 @@ interface TaskItem {
   state: 'pending' | 'active' | 'completed' | 'failed' | 'recovery' | 'waiting';
 }
 
+interface ClarificationOption {
+  option_id: string;
+  label: string;
+  value: string;
+  description?: string;
+  is_recommended?: boolean;
+}
+
+interface ClarificationData {
+  request_id: string;
+  clarification_type: 'ambiguous_target' | 'consequential_action' | 'missing_parameter' | 'human_intervention';
+  prompt: string;
+  options: ClarificationOption[];
+  impact_description?: string;
+  target_name?: string;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'astra';
   content: string;
   tasks: TaskItem[];
-  goalState?: 'running' | 'completed' | 'failed';
+  goalState?: 'running' | 'completed' | 'failed' | 'cancelled' | 'waiting';
+  clarification?: ClarificationData;
+  clarificationResolved?: boolean;
 }
 
 export function ChatPanel() {
@@ -30,6 +49,66 @@ export function ChatPanel() {
     }
   }, [messages, isTyping]);
 
+  const updateMessageFromEvent = (responseId: string, event: any) => {
+    setMessages(prev => 
+      prev.map(msg => {
+        if (msg.id !== responseId) return msg;
+        
+        const updatedMsg = { ...msg, tasks: [...msg.tasks] };
+        
+        if (event.event_type === 'ASSISTANT_RESPONSE') {
+          updatedMsg.content += (event.payload?.text || '');
+        } else if (event.event_type === 'GOAL_COMPLETED') {
+          updatedMsg.goalState = 'completed';
+        } else if (event.event_type === 'GOAL_FAILED') {
+          updatedMsg.goalState = 'failed';
+        } else if (event.event_type === 'GOAL_CANCELLED') {
+          updatedMsg.goalState = 'cancelled';
+        } else if (event.event_type === 'CLARIFICATION_RESOLVED') {
+          updatedMsg.clarificationResolved = true;
+          updatedMsg.goalState = 'running';
+        } else if (event.event_type === 'WAITING_FOR_USER' || event.event_type === 'CLARIFICATION_REQUIRED' || event.event_type === 'CONFIRMATION_REQUIRED') {
+          updatedMsg.goalState = 'waiting';
+          if (event.payload?.clarification) {
+            updatedMsg.clarification = event.payload.clarification;
+          }
+        } else if (event.task_id) {
+          const taskIndex = updatedMsg.tasks.findIndex(t => t.id === event.task_id);
+          
+          let state: TaskItem['state'] = 'pending';
+          if (['TASK_STARTED', 'TASK_PROGRESS', 'VERIFICATION_STARTED'].includes(event.event_type)) state = 'active';
+          if (['TASK_COMPLETED', 'VERIFICATION_COMPLETED'].includes(event.event_type)) state = 'completed';
+          if (event.event_type === 'TASK_FAILED') state = 'failed';
+          if (event.event_type === 'RECOVERY_STARTED') state = 'recovery';
+          if (event.event_type === 'WAITING_FOR_USER') state = 'waiting';
+
+          const existingTask = taskIndex >= 0 ? updatedMsg.tasks[taskIndex] : undefined;
+
+          if (existingTask) {
+            updatedMsg.tasks[taskIndex] = {
+              ...existingTask,
+              label: event.progress_label,
+              state: state !== 'pending' ? state : existingTask.state
+            };
+          } else {
+            updatedMsg.tasks.push({
+              id: event.task_id,
+              label: event.progress_label,
+              state
+            });
+          }
+        }
+
+        if (event.payload?.clarification && !updatedMsg.clarification) {
+          updatedMsg.clarification = event.payload.clarification;
+          updatedMsg.goalState = 'waiting';
+        }
+        
+        return updatedMsg;
+      })
+    );
+  };
+
   const handleSend = async () => {
     if (!inputText.trim() || isTyping) return;
     
@@ -44,62 +123,72 @@ export function ChatPanel() {
 
       await voiceClient.streamMessage(userMsg.content, (event: any) => {
         setIsTyping(false);
-        
         if (!messageCreated) {
           setMessages(prev => [...prev, { id: responseId, role: 'astra', content: '', tasks: [], goalState: 'running' }]);
           messageCreated = true;
         }
-
-        setMessages(prev => 
-          prev.map(msg => {
-            if (msg.id !== responseId) return msg;
-            
-            const updatedMsg = { ...msg, tasks: [...msg.tasks] };
-            
-            if (event.event_type === 'ASSISTANT_RESPONSE') {
-              updatedMsg.content += (event.payload?.text || '');
-            } else if (event.event_type === 'GOAL_COMPLETED') {
-              updatedMsg.goalState = 'completed';
-            } else if (event.event_type === 'GOAL_FAILED') {
-              updatedMsg.goalState = 'failed';
-            } else if (event.task_id) {
-              const taskIndex = updatedMsg.tasks.findIndex(t => t.id === event.task_id);
-              
-              let state: TaskItem['state'] = 'pending';
-              if (['TASK_STARTED', 'TASK_PROGRESS', 'VERIFICATION_STARTED'].includes(event.event_type)) state = 'active';
-              if (['TASK_COMPLETED', 'VERIFICATION_COMPLETED'].includes(event.event_type)) state = 'completed';
-              if (event.event_type === 'TASK_FAILED') state = 'failed';
-              if (event.event_type === 'RECOVERY_STARTED') state = 'recovery';
-              if (event.event_type === 'WAITING_FOR_USER') state = 'waiting';
-
-              const existingTask = taskIndex >= 0 ? updatedMsg.tasks[taskIndex] : undefined;
-
-              if (existingTask) {
-                updatedMsg.tasks[taskIndex] = {
-                  ...existingTask,
-                  label: event.progress_label,
-                  state: state !== 'pending' ? state : existingTask.state
-                };
-              } else {
-                updatedMsg.tasks.push({
-                  id: event.task_id,
-                  label: event.progress_label,
-                  state
-                });
-              }
-            }
-            
-            return updatedMsg;
-          })
-        );
+        updateMessageFromEvent(responseId, event);
       });
-      setIsTyping(false);
-
     } catch (error) {
       console.error('Chat error:', error);
-      setIsTyping(false);
       const errorMsg: Message = { id: Date.now().toString() + '-err', role: 'astra', content: "Sorry, I encountered an error.", tasks: [] };
       setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleClarify = async (requestId: string, optionId?: string, customInput?: string) => {
+    if (isTyping) return;
+    setIsTyping(true);
+
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: optionId || customInput || 'Selection submitted', tasks: [] };
+    setMessages(prev => [...prev, userMsg]);
+
+    const responseId = Date.now().toString() + '-resp';
+    let messageCreated = false;
+
+    try {
+      await voiceClient.clarifyTarget(requestId, optionId, customInput, false, (event: any) => {
+        setIsTyping(false);
+        if (!messageCreated) {
+          setMessages(prev => [...prev, { id: responseId, role: 'astra', content: '', tasks: [], goalState: 'running' }]);
+          messageCreated = true;
+        }
+        updateMessageFromEvent(responseId, event);
+      });
+    } catch (err) {
+      console.error('Clarify error:', err);
+      setMessages(prev => [...prev, { id: Date.now().toString() + '-err', role: 'astra', content: "Failed to submit clarification.", tasks: [] }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleConfirm = async (requestId: string, confirmed: boolean) => {
+    if (isTyping) return;
+    setIsTyping(true);
+
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: confirmed ? 'Approved' : 'Cancelled', tasks: [] };
+    setMessages(prev => [...prev, userMsg]);
+
+    const responseId = Date.now().toString() + '-resp';
+    let messageCreated = false;
+
+    try {
+      await voiceClient.confirmAction(requestId, confirmed, (event: any) => {
+        setIsTyping(false);
+        if (!messageCreated) {
+          setMessages(prev => [...prev, { id: responseId, role: 'astra', content: '', tasks: [], goalState: 'running' }]);
+          messageCreated = true;
+        }
+        updateMessageFromEvent(responseId, event);
+      });
+    } catch (err) {
+      console.error('Confirm error:', err);
+      setMessages(prev => [...prev, { id: Date.now().toString() + '-err', role: 'astra', content: "Failed to submit confirmation.", tasks: [] }]);
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -154,9 +243,55 @@ export function ChatPanel() {
                     ))}
                     {msg.goalState === 'completed' && <div className="task-item completed"><span className="task-icon">✓</span><span className="task-label">Goal completed</span></div>}
                     {msg.goalState === 'failed' && <div className="task-item failed"><span className="task-icon">✗</span><span className="task-label">Goal failed</span></div>}
+                    {msg.goalState === 'cancelled' && <div className="task-item failed"><span className="task-icon">⛔</span><span className="task-label">Goal cancelled</span></div>}
                   </div>
                 )}
                 {msg.content && <div className="message-content">{msg.content}</div>}
+
+                {/* Structured Clarification & Confirmation */}
+                {msg.clarification && !msg.clarificationResolved && (
+                  <div className="clarification-card">
+                    <div className="clarification-prompt">
+                      {msg.clarification.prompt}
+                    </div>
+                    {msg.clarification.impact_description && (
+                      <div className="clarification-impact">
+                        {msg.clarification.impact_description}
+                      </div>
+                    )}
+                    {msg.clarification.clarification_type === 'consequential_action' ? (
+                      <div className="confirmation-actions">
+                        <button 
+                          className="confirm-btn approve"
+                          onClick={() => handleConfirm(msg.clarification!.request_id, true)}
+                          disabled={isTyping}
+                        >
+                          Approve Action
+                        </button>
+                        <button 
+                          className="confirm-btn reject"
+                          onClick={() => handleConfirm(msg.clarification!.request_id, false)}
+                          disabled={isTyping}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="clarification-options">
+                        {msg.clarification.options?.map(opt => (
+                          <button
+                            key={opt.option_id}
+                            className={`clarification-chip ${opt.is_recommended ? 'recommended' : ''}`}
+                            onClick={() => handleClarify(msg.clarification!.request_id, opt.option_id)}
+                            disabled={isTyping}
+                          >
+                            {opt.label} {opt.is_recommended ? '★' : ''}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))
           )}

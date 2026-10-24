@@ -64,6 +64,9 @@ data/documents/
 data/uploads/
 data/cache/
 data/local/
+*.db
+*.db-shm
+*.db-wal
 
 # ========================
 # Logs

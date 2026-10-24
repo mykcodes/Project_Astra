@@ -30,7 +30,7 @@ class RecoveryEngine:
             strategy = RecoveryStrategy.DETERMINE_RELEVANCE
         elif failure_class == FailureClass.CLICK_NO_EFFECT:
             strategy = RecoveryStrategy.ALTERNATE_TARGET
-        elif failure_class == FailureClass.VERIFICATION_FAILED:
+        elif failure_class in (FailureClass.VERIFICATION_FAILED, FailureClass.UNKNOWN, FailureClass.WINDOW_NOT_FOCUSED):
             strategy = RecoveryStrategy.INSPECT_STATE
         else:
             strategy = RecoveryStrategy.ABORT_SAFE

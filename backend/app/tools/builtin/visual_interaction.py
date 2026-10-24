@@ -64,6 +64,11 @@ class ExecuteVisualInteractionTool(Tool):
                 "maximum": 1.0,
                 "description": "Minimum confidence threshold for target selection. Defaults to 0.5.",
                 "default": 0.5
+            },
+            "target_bounds": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Optional bounding box [x, y, w, h] to scope visual target perception to a specific window or screen region."
             }
         },
         "required": ["query"],
@@ -83,7 +88,13 @@ class ExecuteVisualInteractionTool(Tool):
     def service(self) -> VisualInteractionService:
         return self._service
 
-    async def execute(self, query: str, min_confidence: float = 0.5, **kwargs) -> dict:
+    async def execute(
+        self,
+        query: str,
+        min_confidence: float = 0.5,
+        target_bounds: list | None = None,
+        **kwargs
+    ) -> dict:
         """
         Execute visually-grounded CLICK.
 
@@ -99,10 +110,20 @@ class ExecuteVisualInteractionTool(Tool):
         are translated into structured dicts (not swallowed).
         """
         try:
-            result = await self._service.execute_click(
-                query=query,
-                min_confidence=min_confidence,
-            )
+            kwargs_to_pass = {
+                "query": query,
+                "min_confidence": min_confidence,
+                "recheck_pre_actuation": True,
+            }
+            if target_bounds and len(target_bounds) == 4:
+                kwargs_to_pass["target_bounds"] = (
+                    int(target_bounds[0]),
+                    int(target_bounds[1]),
+                    int(target_bounds[2]),
+                    int(target_bounds[3]),
+                )
+
+            result = await self._service.execute_click(**kwargs_to_pass)
 
             result_dict = result.to_dict()
             result_dict["success"] = result.actuation_success

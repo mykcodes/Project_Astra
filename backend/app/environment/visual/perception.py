@@ -19,6 +19,7 @@ Zero targets are fabricated.
 Stale observations and expired references are rejected with structured errors.
 """
 
+import asyncio
 import concurrent.futures
 import math
 import re
@@ -130,7 +131,19 @@ def _run_windows_media_ocr(raw_bytes: bytes, width: int, height: int) -> List[Tu
         )
         sb.copy_from_buffer(buf)
 
-        res = engine.recognize_async(sb).get()
+        async def _recognize():
+            return await engine.recognize_async(sb)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                res = pool.submit(asyncio.run, _recognize()).result()
+        else:
+            res = asyncio.run(_recognize())
     except VisualPerceptionError:
         raise
     except Exception as e:
@@ -198,14 +211,40 @@ class OcrPerceptionProvider:
         if not query or not query.strip():
             return []
 
+        all_targets = self.extract_all_targets(observation)
+        matched = [
+            t.model_copy(update={"semantic_attributes": {**t.semantic_attributes, "query": query}})
+            for t in all_targets
+            if matches_text_query(t.label, query)
+        ]
+        logger.info("OCR_PERCEPTION_COMPLETED", extra={
+            "observation_id": observation.observation_id,
+            "query": query,
+            "candidates_found": len(matched),
+        })
+        return matched
+
+    def extract_all_targets(self, observation: VisualObservation) -> List[VisualTarget]:
+        """
+        Runs OCR and extracts all valid visual text candidates across the observation
+        without filtering by a semantic query.
+        """
         # 1. Freshness check: Reject observation if physical interaction occurred after capture
         last_interaction = interaction_tracker.get_last_interaction()
-        if last_interaction > observation.captured_at:
+        obs_time = observation.captured_at
+        if getattr(last_interaction, "tzinfo", None) is not None and getattr(obs_time, "tzinfo", None) is None:
+            from datetime import timezone
+            obs_time = obs_time.replace(tzinfo=timezone.utc)
+        elif getattr(last_interaction, "tzinfo", None) is None and getattr(obs_time, "tzinfo", None) is not None:
+            from datetime import timezone
+            last_interaction = last_interaction.replace(tzinfo=timezone.utc)
+
+        if last_interaction > obs_time:
             raise VisualCaptureError(
                 "STALE_OBSERVATION",
                 f"Observation {observation.observation_id} is stale. "
                 f"A physical interaction occurred at {last_interaction.isoformat()} "
-                f"which is after the capture timestamp {observation.captured_at.isoformat()}."
+                f"which is after the capture timestamp {obs_time.isoformat()}."
             )
 
         # 2. Retrieve image buffer from ImageReferenceStore
@@ -230,14 +269,12 @@ class OcrPerceptionProvider:
 
         # 4. Run OCR engine
         if self._ocr_engine is not None:
-            # Custom or test-double engine
             bgra = np.frombuffer(raw_bytes, dtype=np.uint8).reshape(
                 (observation.height, observation.width, 4)
             )
             bgr = bgra[:, :, :3]
             try:
                 engine_output = self._ocr_engine(bgr)
-                # Handle tuple return (results, elapse) or raw results
                 if isinstance(engine_output, tuple):
                     results = engine_output[0]
                 else:
@@ -250,7 +287,6 @@ class OcrPerceptionProvider:
                     f"OCR inference failed: {e}"
                 )
         else:
-            # Production Windows Media OCR running in MTA thread
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     results = pool.submit(
@@ -268,30 +304,19 @@ class OcrPerceptionProvider:
                 )
 
         if not results:
-            logger.info("OCR_PERCEPTION_NO_TEXT", extra={
-                "observation_id": observation.observation_id,
-                "query": query,
-            })
             return []
 
-        # 5. Parse, validate, and match detections
         candidates: List[VisualTarget] = []
-
         for idx, item in enumerate(results):
-            # item format: [box_or_polygon, detected_text, score]
             box_or_polygon, detected_text, score = item[0], item[1], item[2]
 
-            # Validate detected_text
             if not isinstance(detected_text, str) or not detected_text.strip():
                 continue
 
-            # Validate polygon / geometry
             if len(box_or_polygon) == 4 and isinstance(box_or_polygon[0], (list, tuple)):
-                # 4-point polygon [[x0, y0], [x1, y1], [x2, y2], [x3, y3]]
                 xs = [float(p[0]) for p in box_or_polygon]
                 ys = [float(p[1]) for p in box_or_polygon]
             elif len(box_or_polygon) == 4 and isinstance(box_or_polygon[0], (int, float)):
-                # Flat bbox [x, y, w, h]
                 x_val = float(box_or_polygon[0])
                 y_val = float(box_or_polygon[1])
                 w_val = float(box_or_polygon[2])
@@ -304,7 +329,6 @@ class OcrPerceptionProvider:
                     f"Unexpected bounding box format: {box_or_polygon}"
                 )
 
-            # Check non-finite geometry
             if any(math.isnan(x) or math.isinf(x) for x in xs) or any(
                 math.isnan(y) or math.isinf(y) for y in ys
             ):
@@ -320,14 +344,12 @@ class OcrPerceptionProvider:
             bbox_width = max_x - min_x
             bbox_height = max_y - min_y
 
-            # Check empty or negative geometry
             if min_x < 0 or min_y < 0 or bbox_width <= 0 or bbox_height <= 0:
                 raise VisualPerceptionError(
                     "INVALID_TARGET_GEOMETRY",
                     f"Malformed bounding box geometry: ({min_x}, {min_y}, {bbox_width}, {bbox_height})."
                 )
 
-            # Check observation bounds
             if min_x + bbox_width > observation.width or min_y + bbox_height > observation.height:
                 raise VisualPerceptionError(
                     "INVALID_TARGET_GEOMETRY",
@@ -335,7 +357,6 @@ class OcrPerceptionProvider:
                     f"exceeds observation dimensions ({observation.width}x{observation.height})."
                 )
 
-            # Check confidence
             confidence = float(score)
             if math.isnan(confidence) or math.isinf(confidence) or confidence < 0.0 or confidence > 1.0:
                 raise VisualPerceptionError(
@@ -343,33 +364,24 @@ class OcrPerceptionProvider:
                     f"Detection confidence {confidence} is outside valid range [0.0, 1.0]."
                 )
 
-            # Semantic matching
-            if matches_text_query(detected_text, query):
-                target_id = f"ocr_target_{observation.observation_id}_{idx}"
-                candidates.append(
-                    VisualTarget(
-                        target_id=target_id,
-                        label=detected_text,
-                        target_type="text",
-                        confidence=confidence,
-                        bbox_x=min_x,
-                        bbox_y=min_y,
-                        bbox_width=bbox_width,
-                        bbox_height=bbox_height,
-                        source_observation_id=observation.observation_id,
-                        semantic_attributes={
-                            "detected_text": detected_text,
-                            "ocr_confidence": confidence,
-                            "query": query,
-                        },
-                    )
+            target_id = f"ocr_target_{observation.observation_id}_{idx}"
+            candidates.append(
+                VisualTarget(
+                    target_id=target_id,
+                    label=detected_text,
+                    target_type="text",
+                    confidence=confidence,
+                    bbox_x=min_x,
+                    bbox_y=min_y,
+                    bbox_width=bbox_width,
+                    bbox_height=bbox_height,
+                    source_observation_id=observation.observation_id,
+                    semantic_attributes={
+                        "detected_text": detected_text,
+                        "ocr_confidence": confidence,
+                    },
                 )
-
-        logger.info("OCR_PERCEPTION_COMPLETED", extra={
-            "observation_id": observation.observation_id,
-            "query": query,
-            "candidates_found": len(candidates),
-        })
+            )
 
         return candidates
 

@@ -13,6 +13,9 @@ export class MicrophoneService {
   private analyser: AnalyserNode | null = null;
   private animationFrameId: number | null = null;
 
+  public lastRecordingStartMs: number = 0;
+  public lastRecordingDurationMs: number = 0;
+
   /**
    * Request microphone permissions and start recording.
    */
@@ -21,6 +24,7 @@ export class MicrophoneService {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.mediaRecorder = new MediaRecorder(this.stream);
       this.audioChunks = [];
+      this.lastRecordingStartMs = Date.now();
 
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -84,6 +88,7 @@ export class MicrophoneService {
       }
 
       this.mediaRecorder.onstop = () => {
+        this.lastRecordingDurationMs = Math.max(0, Date.now() - this.lastRecordingStartMs);
         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
         this.audioChunks = [];
         this.cleanup();

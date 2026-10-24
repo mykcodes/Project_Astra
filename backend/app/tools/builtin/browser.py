@@ -20,11 +20,11 @@ class ExecuteBrowserIntentTool(Tool):
                 "description": "The high-level action to perform."
             },
             "target": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "URL for NAVIGATE, or query for SEARCH."
             },
             "browser_name": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "The name of the browser to use (e.g. Chrome, Brave). Defaults to the active or default browser."
             },
             "_verify_only": {
@@ -66,15 +66,15 @@ class InteractBrowserTool(Tool):
                 "description": "The interaction action to perform."
             },
             "target": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "Semantic description of the target (e.g. 'search field', 'first video')."
             },
             "value": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "The text to type for the TYPE/FILL action."
             },
             "browser_name": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "The name of the browser to use. Defaults to the active browser session."
             },
             "_verify_only": {

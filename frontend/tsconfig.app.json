@@ -26,7 +26,7 @@
     "noFallthroughCasesInSwitch": true,
 
     /* Ignore TS 6.0 deprecation warnings for baseUrl */
-    "ignoreDeprecations": "5.0",
+    "ignoreDeprecations": "6.0",
 
     /* Path aliases */
     "baseUrl": ".",

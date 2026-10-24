@@ -19,12 +19,27 @@ class ContextEngine:
             return fw.title.split('-')[-1].strip()
         return None
         
-    def resolve_reference(self, reference: str) -> Optional[str]:
-        reference = reference.lower().strip()
-        if reference in ("it", "this", "that", "the target"):
+    def resolve_reference(self, reference: str, memory_engine: Optional[Any] = None) -> Optional[str]:
+        ref_norm = reference.lower().strip()
+        if ref_norm in ("it", "this", "that", "the target", "the app", "current app"):
             if self.ui_context.current_ui_target:
                 return self.ui_context.current_ui_target
             return self.current_application or self.last_referenced_entity or self.get_foreground_application()
+
+        # Phase B.10: Check application alias in MemoryEngine
+        if memory_engine is not None or ref_norm.startswith("my ") or ref_norm in ("browser", "editor", "notes", "notes editor"):
+            engine = memory_engine
+            if engine is None:
+                try:
+                    from app.memory.engine import get_memory_engine
+                    engine = get_memory_engine()
+                except Exception:
+                    engine = None
+            if engine is not None:
+                profile = engine.resolve_target_alias(ref_norm)
+                if profile:
+                    return profile.canonical_name
+
         return reference
         
     def update_interaction_context(self, target: str, action: str, success: bool, observation: Optional[UIObservation] = None):

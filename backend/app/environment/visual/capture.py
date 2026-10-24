@@ -15,6 +15,7 @@ SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
 SM_CXVIRTUALSCREEN = 78
 SM_CYVIRTUALSCREEN = 79
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 
 class ImageReferenceStore:
     """
@@ -109,19 +110,113 @@ class ScreenCaptureProvider:
         self.store = ImageReferenceStore()
         self._backend = DxcamCaptureBackend()
 
+    def _with_dpi_awareness(self, func):
+        user32 = getattr(ctypes, "windll", None) and getattr(ctypes.windll, "user32", None)
+        if not user32:
+            return func()
+        
+        try:
+            original_context = user32.GetThreadDpiAwarenessContext()
+        except AttributeError:
+            original_context = None
+
+        try:
+            if hasattr(user32, "SetThreadDpiAwarenessContext"):
+                user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        except Exception as e:
+            logger.warning(f"Failed to set DPI awareness context: {e}")
+
+        try:
+            result = func()
+        finally:
+            if original_context and hasattr(user32, "SetThreadDpiAwarenessContext"):
+                user32.SetThreadDpiAwarenessContext(original_context)
+                
+        return result
+
     def _get_virtual_screen_bounds(self) -> Tuple[int, int, int, int]:
         """Returns (x, y, width, height) of the physical virtual screen."""
-        user32 = ctypes.windll.user32
-        x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
-        y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-        cx = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-        cy = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
-        
-        if cx == 0 or cy == 0:
-            cx = user32.GetSystemMetrics(0) # SM_CXSCREEN
-            cy = user32.GetSystemMetrics(1) # SM_CYSCREEN
+        def _get():
+            user32 = ctypes.windll.user32
+            x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+            y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+            cx = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+            cy = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
             
-        return x, y, cx, cy
+            if cx == 0 or cy == 0:
+                cx = user32.GetSystemMetrics(0) # SM_CXSCREEN
+                cy = user32.GetSystemMetrics(1) # SM_CYSCREEN
+                
+            return x, y, cx, cy
+
+        return self._with_dpi_awareness(_get)
+
+    def _capture_gdi(self, vx: int, vy: int, vw: int, vh: int) -> Optional[np.ndarray]:
+        """Captures arbitrary virtual-screen rectangle using native Win32 GDI BitBlt."""
+        user32 = getattr(ctypes, "windll", None) and getattr(ctypes.windll, "user32", None)
+        gdi32 = getattr(ctypes, "windll", None) and getattr(ctypes.windll, "gdi32", None)
+        if not user32 or not gdi32:
+            return None
+
+        hdc_screen = None
+        hdc_mem = None
+        hbm = None
+        try:
+            hdc_screen = user32.GetDC(0)
+            if not hdc_screen:
+                return None
+            hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+            if not hdc_mem:
+                return None
+            hbm = gdi32.CreateCompatibleBitmap(hdc_screen, vw, vh)
+            if not hbm:
+                return None
+            gdi32.SelectObject(hdc_mem, hbm)
+            SRCCOPY = 0x00CC0020
+            CAPTUREBLT = 0x40000000
+            success = gdi32.BitBlt(hdc_mem, 0, 0, vw, vh, hdc_screen, vx, vy, SRCCOPY | CAPTUREBLT)
+            if not success:
+                return None
+
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _fields_ = [
+                    ('biSize', ctypes.c_uint32),
+                    ('biWidth', ctypes.c_int32),
+                    ('biHeight', ctypes.c_int32),
+                    ('biPlanes', ctypes.c_uint16),
+                    ('biBitCount', ctypes.c_uint16),
+                    ('biCompression', ctypes.c_uint32),
+                    ('biSizeImage', ctypes.c_uint32),
+                    ('biXPelsPerMeter', ctypes.c_int32),
+                    ('biYPelsPerMeter', ctypes.c_int32),
+                    ('biClrUsed', ctypes.c_uint32),
+                    ('biClrImportant', ctypes.c_uint32),
+                ]
+
+            bmi = BITMAPINFOHEADER()
+            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.biWidth = vw
+            bmi.biHeight = -vh  # top-down row order
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0
+
+            buf = (ctypes.c_ubyte * (vw * vh * 4))()
+            lines = gdi32.GetDIBits(hdc_mem, hbm, 0, vh, ctypes.byref(buf), ctypes.byref(bmi), 0)
+            if lines != vh:
+                return None
+
+            return np.frombuffer(buf, dtype=np.uint8).reshape((vh, vw, 4))
+        except Exception as e:
+            logger.warning(f"GDI BitBlt capture fallback encountered error: {e}")
+            return None
+        finally:
+            if hbm and gdi32:
+                gdi32.DeleteObject(hbm)
+            if hdc_mem and gdi32:
+                gdi32.DeleteDC(hdc_mem)
+            if hdc_screen and user32:
+                user32.ReleaseDC(0, hdc_screen)
 
     def capture_virtual_screen(self, observation_id: str) -> VisualObservation:
         """
@@ -132,10 +227,37 @@ class ScreenCaptureProvider:
             # 1. Fetch expected physical metrics
             vx, vy, vcx, vcy = self._get_virtual_screen_bounds()
             
-            # 2. Capture using backend
-            frame = self._backend.capture()
-            height, width, _ = frame.shape
-            
+            # 2. Capture using primary backend (DXcam)
+            frame = None
+            try:
+                frame = self._backend.capture()
+            except Exception as e:
+                logger.debug(f"Primary DXcam backend capture failed: {e}. Trying GDI BitBlt fallback...")
+
+            # If DXcam gave mismatched dimensions or failed, attempt GDI BitBlt fallback
+            if frame is not None:
+                height, width, _ = frame.shape
+                if width != vcx or height != vcy:
+                    logger.info(
+                        f"Primary capture dimensions ({width}x{height}) do not match "
+                        f"physical virtual-screen metrics ({vcx}x{vcy}). Attempting GDI BitBlt fallback."
+                    )
+                    gdi_frame = self._capture_gdi(vx, vy, vcx, vcy)
+                    if gdi_frame is not None:
+                        frame = gdi_frame
+                        height, width, _ = frame.shape
+            else:
+                gdi_frame = self._capture_gdi(vx, vy, vcx, vcy)
+                if gdi_frame is not None:
+                    frame = gdi_frame
+                    height, width, _ = frame.shape
+
+            if frame is None:
+                raise VisualCaptureError(
+                    "CAPTURE_UNAVAILABLE",
+                    "All capture backends (DXcam and GDI BitBlt) failed to capture screen."
+                )
+
             # 3. Prove invariant: frame dimensions MUST match physical metrics exactly
             if width != vcx or height != vcy:
                 raise VisualCaptureError(

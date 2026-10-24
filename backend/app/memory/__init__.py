@@ -1,22 +1,35 @@
 """
-ASTRA Memory Architecture
+ASTRA Memory Architecture (Phase B.10)
 
-The memory system defines what ASTRA remembers, why, and for how long.
-
-Categories (Future):
+The memory system manages what ASTRA remembers across sessions:
 - ShortTerm: The current active conversation context
-- Working: Active project/task context
-- LongTerm: Explicitly saved user facts
-- Episodic: Interaction history and summaries
-- Semantic: Concept and entity relationships
+- Working: Active project/task execution context
+- LongTerm: Explicitly saved user facts and durable preferences
+- Episodic: Interaction history and verified completed goal summaries
+- Semantic: Application profiles, concepts, and entity alias relationships
 """
 
-from enum import Enum
+from app.domain.memory import (
+    MEMORY_SCHEMA_VERSION,
+    MemoryType,
+    ProvenanceType,
+    MemoryRecord,
+    ApplicationProfile,
+    EpisodicGoalSummary,
+    MemoryQuery,
+    MemorySearchResult,
+)
+from app.memory.engine import MemoryEngine, get_memory_engine
 
-
-class MemoryType(str, Enum):
-    SHORT_TERM = "short_term"
-    WORKING = "working"
-    LONG_TERM = "long_term"
-    EPISODIC = "episodic"
-    SEMANTIC = "semantic"
+__all__ = [
+    "MEMORY_SCHEMA_VERSION",
+    "MemoryType",
+    "ProvenanceType",
+    "MemoryRecord",
+    "ApplicationProfile",
+    "EpisodicGoalSummary",
+    "MemoryQuery",
+    "MemorySearchResult",
+    "MemoryEngine",
+    "get_memory_engine",
+]
