@@ -12,5 +12,3 @@ This directory contains documentation for ASTRA's document ingestion and Retriev
 6. **Reranking**: Cross-encoder reordering for relevance.
 
 For code, see `backend/app/knowledge/`.
-
-<!-- ASTRA Prompt & Architecture Note: Ref #6 -->
