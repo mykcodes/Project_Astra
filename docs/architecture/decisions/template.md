@@ -18,5 +18,3 @@ Why are we doing this? What are the benefits? What alternatives were considered?
 ## Consequences
 
 What becomes easier or more difficult to do because of this change?
-
-<!-- ASTRA Prompt & Architecture Note: Ref #8 -->
