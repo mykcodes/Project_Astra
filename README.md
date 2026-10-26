@@ -137,3 +137,5 @@ Use [docs/architecture/decisions/template.md](docs/architecture/decisions/templa
 =======
 # Project_Astra
 >>>>>>> 2d7ed071b16dc748c6afeb210490acdc913d6514
+
+<!-- ASTRA Prompt & Architecture Note: Ref #18 -->
