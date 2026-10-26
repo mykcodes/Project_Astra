@@ -53,5 +53,3 @@ The system is strictly divided into layers, with one-way dependencies pointing d
 - No hardcoded secrets. Use `.env`.
 - Tool execution requires explicit permission scopes.
 - All dependencies are pinned.
-
-<!-- ASTRA Prompt & Architecture Note: Ref #7 -->
