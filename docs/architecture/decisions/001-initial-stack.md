@@ -30,3 +30,5 @@ We have selected the following stack:
 
 - The team must maintain expertise in both TypeScript and Python.
 - Desktop capabilities (like window management) will require an abstraction layer (`PlatformAdapter`) until an Electron/Tauri wrapper is introduced.
+
+<!-- ASTRA Prompt & Architecture Note: Ref #9 -->
