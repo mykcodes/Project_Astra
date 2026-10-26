@@ -90,3 +90,5 @@ All resolved targets are strictly validated against `ApplicationCatalog` before 
 | `DELETE` | `/api/conversation/memory/{key}` | Delete a memory record by key |
 | `GET` | `/api/conversation/memory/profiles` | List registered application profiles |
 | `POST` | `/api/conversation/memory/profiles` | Register or update an application profile |
+
+<!-- ASTRA Prompt & Architecture Note: Ref #2 -->
