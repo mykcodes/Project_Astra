@@ -13,3 +13,5 @@ ASTRA is voice-first. The complete pipeline is:
 For code, see:
 - Frontend: `frontend/src/services/interaction/`
 - Backend: `backend/app/voice/`
+
+<!-- ASTRA Prompt & Architecture Note: Ref #5 -->
