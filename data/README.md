@@ -8,5 +8,3 @@ Subdirectories (created at runtime):
 - `uploads/`: Temporary user uploads.
 - `cache/`: Audio and API response caching.
 - `local/`: Local SQLite/DuckDB databases if used for tools.
-
-<!-- ASTRA Prompt & Architecture Note: Ref #15 -->
