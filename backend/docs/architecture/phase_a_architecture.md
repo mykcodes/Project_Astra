@@ -24,3 +24,5 @@ The `FreshnessEvaluator` assesses the observation timestamp against predefined `
 ## Observation Failures
 Environmental observation failures are strictly mapped to `ObservationStatus` (`SUCCESS`, `PARTIAL`, `FAILED`) instead of mutating underlying `WorldState` fields to false values.
 Structured error types (`ProcessQueryError`, `WindowQueryError`, etc.) prevent broad catch-alls.
+
+<!-- ASTRA Prompt & Architecture Note: Ref #11 -->
