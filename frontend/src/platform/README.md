@@ -32,5 +32,3 @@ With this abstraction, moving to a desktop runtime means implementing one new ad
 1. **Core components import from `@/platform`, never from browser globals**
 2. Only `platform/*.ts` files may use `navigator`, `Notification`, `window.*`
 3. New platform capabilities are added to the interface first, then implemented per adapter
-
-<!-- ASTRA Prompt & Architecture Note: Ref #17 -->
