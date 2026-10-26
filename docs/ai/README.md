@@ -11,5 +11,3 @@ The AI system is strictly separated into:
 4. **Context Builder**: Assembles the working memory and relevant semantic/episodic memory for the current prompt.
 
 For code, see `backend/app/ai/`.
-
-<!-- ASTRA Prompt & Architecture Note: Ref #1 -->
