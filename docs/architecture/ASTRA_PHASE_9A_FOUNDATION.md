@@ -134,5 +134,3 @@ Testing focuses on capability fulfillment, provider fallback, world-state reflec
 - Architecture document is finalized and locked.
 - Implementation-impact summary is generated identifying Phase 7/8 components for RETAIN, EXTEND, REFACTOR, DEPRECATE, or REPLACE.
 - No implementation code is written.
-
-<!-- ASTRA Prompt & Architecture Note: Ref #10 -->
