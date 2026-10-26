@@ -9,3 +9,5 @@ This directory contains documentation for ASTRA's tool execution system.
 3. **No Blind Execution**: High-risk tools (file deletion, sending email) require explicit user approval.
 
 For code, see `backend/app/tools/`.
+
+<!-- ASTRA Prompt & Architecture Note: Ref #3 -->
